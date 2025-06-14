@@ -335,11 +335,32 @@ class TradingBot:
         # Here you could add email/SMS/Discord notifications
         # For now, just log the alert
         
-    def handle_kline_data(self, client, message):
-        """Handle incoming kline (candlestick) data"""
+    def handle_kline_data(self, ws_client, message):
+        """Handle incoming kline data from WebSocket"""
         try:
-            # Extract kline data from message
-            kline = message['k']
+            # Parse JSON message if it's a string
+            if isinstance(message, str):
+                import json
+                message = json.loads(message)
+            
+            # Handle different message types
+            if 'result' in message and 'id' in message:
+                # This is a subscription confirmation message
+                return
+            
+            if 'stream' in message and 'data' in message:
+                # This is the actual kline data
+                data = message['data']
+                if 'k' not in data:
+                    self.logger.error(f"Missing 'k' key in data: {list(data.keys())}")
+                    return
+                kline = data['k']
+            elif 'k' in message:
+                # Direct kline message format
+                kline = message['k']
+            else:
+                self.logger.debug(f"Unhandled message type: {list(message.keys())}")
+                return
             close_price = float(kline['c'])
             timestamp = kline['t']
             
