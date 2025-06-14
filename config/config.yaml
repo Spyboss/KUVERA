@@ -1,0 +1,39 @@
+# Binance API Configuration
+api:
+  api_key: "YOUR_BINANCE_API_KEY"  # Replace with your actual API key
+  api_secret: "YOUR_BINANCE_SECRET_KEY"  # Replace with your actual secret key
+  testnet: true  # Set to false for live trading
+  base_url: "https://testnet.binance.vision"  # Testnet URL
+
+# Trading Configuration
+trading:
+  symbol: "BTCUSDT"
+  capital: 30.0  # Total capital in USDT
+  risk_per_trade: 0.01  # 1% risk per trade
+  max_position_size: 0.30  # Maximum $0.30 per trade
+  
+# Strategy Parameters
+strategy:
+  sma_period: 20
+  entry_threshold: 0.005  # 0.5% below SMA to buy
+  exit_threshold: 0.005   # 0.5% above SMA to sell
+  stop_loss: 0.008        # 0.8% stop loss
+  
+# Risk Management
+risk:
+  max_daily_trades: 5
+  max_daily_loss: 1.0  # Maximum daily loss in USDT
+  cooldown_period: 300  # 5 minutes between trades
+  
+# Monitoring
+monitoring:
+  profit_alert_threshold: 1.0  # Alert when profit reaches $1
+  drawdown_alert_threshold: 0.5  # Alert when drawdown exceeds $0.50
+  log_level: "INFO"
+  
+# Backtesting
+backtest:
+  start_date: "2024-01-01"
+  end_date: "2024-12-31"
+  initial_cash: 30.0
+  commission: 0.001  # 0.1% trading fee
