@@ -74,6 +74,68 @@ cp .env.template .env
 python bot.py
 ```
 
+6. **Run backtesting:**
+```bash
+python backtest.py
+```
+
+## 🔧 Troubleshooting
+
+### Common Issues and Fixes
+
+#### 1. UnicodeEncodeError in Backtest
+**Problem:** `UnicodeEncodeError: 'charmap' codec can't encode character '🔍'`
+
+**Solution:** The backtest module now uses UTF-8 encoding for all log files and replaces Unicode emojis with plain text alternatives:
+- Logs are written with explicit UTF-8 encoding
+- Unicode characters are replaced with ASCII equivalents (e.g., '🔍' → '[OPT]')
+- Safe logging method handles encoding fallbacks automatically
+
+#### 2. scikit-learn Feature Name Warnings
+**Problem:** `X does not have valid feature names, but StandardScaler was fitted with feature names`
+
+**Solution:** Feature names are now consistently maintained throughout the ML pipeline:
+- StandardScaler is fitted with proper DataFrame column names
+- Feature columns are stored as instance variables for consistency
+- ML signal generation uses DataFrames with proper column names
+- All transformations preserve feature name integrity
+
+#### 3. Memory Issues on 8GB RAM
+**Problem:** Out of memory errors during ML training or backtesting
+
+**Solution:** Memory optimizations implemented:
+- Reduced GridSearchCV cross-validation folds from 3 to 2
+- Limited XGBoost parameters: n_estimators=50, max_depth=4
+- Single-threaded processing (n_jobs=1)
+- Efficient tree method ('hist') for XGBoost
+- Progress bars to show processing status
+
+#### 4. Backtest Interruption
+**Problem:** KeyboardInterrupt or premature termination
+
+**Solution:** Enhanced user experience:
+- Progress bars show real-time processing status
+- Reduced processing time through optimized parameters
+- Clear status indicators for each processing step
+- Graceful error handling and logging
+
+### Performance Tips
+
+1. **For 8GB RAM systems:**
+   - Use default ML parameters (already optimized)
+   - Close other applications during backtesting
+   - Consider shorter date ranges for initial testing
+
+2. **For faster backtesting:**
+   - Use higher timeframes (1h instead of 5m)
+   - Reduce date range for testing
+   - Disable AI features temporarily if needed
+
+3. **Log file management:**
+   - Logs are saved to `logs/backtest_YYYYMMDD.log`
+   - Results are saved to `backtest_results/`
+   - Charts are automatically generated and saved
+
 ## 🔧 Configuration
 
 ### Environment Variables (.env)

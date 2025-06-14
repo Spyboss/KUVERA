@@ -82,19 +82,57 @@ class BacktestEngine:
         self.setup_ml_components()
         
     def setup_logging(self):
-        """Setup logging configuration"""
+        """Setup logging configuration with UTF-8 encoding"""
         os.makedirs('logs', exist_ok=True)
         
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(f'logs/backtest_{datetime.now().strftime("%Y%m%d")}.log'),
-                logging.StreamHandler()
-            ]
+        # Create file handler with UTF-8 encoding
+        file_handler = logging.FileHandler(
+            f'logs/backtest_{datetime.now().strftime("%Y%m%d")}.log',
+            encoding='utf-8'
         )
+        file_handler.setLevel(logging.INFO)
         
+        # Create console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        
+        # Create formatter
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        console_handler.setFormatter(formatter)
+        
+        # Configure logger
         self.logger = logging.getLogger('BacktestEngine')
+        self.logger.setLevel(logging.INFO)
+        self.logger.addHandler(file_handler)
+        self.logger.addHandler(console_handler)
+        
+        # Prevent duplicate logs
+        self.logger.propagate = False
+        
+    def safe_log(self, message, level="info"):
+        """Safe logging method that handles Unicode encoding issues"""
+        try:
+            # Try to log the original message
+            if level == "info":
+                self.logger.info(message)
+            elif level == "error":
+                self.logger.error(message)
+            elif level == "warning":
+                self.logger.warning(message)
+            elif level == "debug":
+                self.logger.debug(message)
+        except UnicodeEncodeError:
+            # Fallback: replace problematic Unicode characters
+            safe_message = message.encode('ascii', 'replace').decode('ascii')
+            if level == "info":
+                self.logger.info(safe_message)
+            elif level == "error":
+                self.logger.error(safe_message)
+            elif level == "warning":
+                self.logger.warning(safe_message)
+            elif level == "debug":
+                self.logger.debug(safe_message)
         
     def setup_ml_components(self):
         """Setup enhanced machine learning components with hyperparameter optimization"""
@@ -134,20 +172,21 @@ class BacktestEngine:
             return self.ml_model
             
         try:
-            self.logger.info("🔍 Starting hyperparameter optimization...")
+            # Use safe logging to avoid Unicode encoding issues
+            self.safe_log("[OPT] Starting hyperparameter optimization...")
             
-            # Use smaller parameter grid for memory efficiency
+            # Use smaller parameter grid for memory efficiency (8GB RAM optimization)
             reduced_param_grid = {
-                'n_estimators': [30, 50],
-                'max_depth': [3, 4],
-                'learning_rate': [0.1, 0.2]
+                'n_estimators': [30, 50],  # Reduced options
+                'max_depth': [3, 4],       # Reduced depth
+                'learning_rate': [0.1, 0.2]  # Reduced options
             }
             
-            # GridSearchCV with cross-validation
+            # GridSearchCV with reduced CV folds for memory efficiency
             grid_search = GridSearchCV(
                 estimator=self.ml_model,
                 param_grid=reduced_param_grid,
-                cv=3,  # 3-fold cross-validation for speed
+                cv=2,  # Reduced from 3 to 2 for better memory efficiency
                 scoring='neg_mean_squared_error',
                 n_jobs=1,  # Single job for memory efficiency
                 verbose=0
@@ -371,14 +410,14 @@ class BacktestEngine:
         return df
         
     def train_ml_model(self, df: pd.DataFrame):
-        """Train the machine learning model"""
+        """Train the machine learning model with progress tracking"""
         if self.ml_model is None or train_test_split is None:
             return
             
         self.console.print("[cyan]🎯 Training ML model...[/cyan]")
         
-        # Select features
-        feature_columns = [
+        # Select features (store as instance variable for consistency)
+        self.feature_columns = [
             'price_change', 'price_change_5', 'price_change_10',
             'volatility', 'rsi', 'close_to_sma', 'close_to_bb_upper',
             'close_to_bb_lower', 'volume_ratio', 'macd', 'macd_hist'
@@ -386,11 +425,11 @@ class BacktestEngine:
         
         # Prepare data
         df_clean = df.dropna()
-        X = df_clean[feature_columns]
+        X = df_clean[self.feature_columns]
         y = df_clean['future_return']
         
         if len(X) < 100:
-            self.logger.warning("Insufficient data for ML training")
+            self.safe_log("Insufficient data for ML training", "warning")
             return
             
         # Split data
@@ -398,9 +437,13 @@ class BacktestEngine:
             X, y, test_size=0.2, random_state=42, shuffle=False
         )
         
-        # Scale features
+        # Scale features with proper feature names
+        self.scaler = StandardScaler()
         X_train_scaled = self.scaler.fit_transform(X_train)
         X_test_scaled = self.scaler.transform(X_test)
+        
+        # Store feature names for consistent usage
+        self.scaler.feature_names_in_ = self.feature_columns
         
         # Optimize hyperparameters using GridSearchCV
         optimized_model = self.optimize_model_parameters(X_train_scaled, y_train)
@@ -431,10 +474,10 @@ class BacktestEngine:
         
         # Log best parameters if optimization was successful
         if hasattr(self, 'model_performance') and self.model_performance:
-            self.logger.info(f"🎯 Optimized parameters: {self.model_performance.get('best_params', {})}")
+            self.safe_log(f"[TARGET] Optimized parameters: {self.model_performance.get('best_params', {})}")
         
     def get_ml_signal(self, features: Dict[str, float]) -> float:
-        """Get ML prediction signal using optimized model"""
+        """Get ML prediction signal using optimized model with consistent feature names"""
         # Use best_model if available, otherwise fall back to ml_model
         model_to_use = self.best_model if self.best_model is not None else self.ml_model
         
@@ -442,21 +485,28 @@ class BacktestEngine:
             return 0.0
             
         try:
-            feature_columns = [
-                'price_change', 'price_change_5', 'price_change_10',
-                'volatility', 'rsi', 'close_to_sma', 'close_to_bb_upper',
-                'close_to_bb_lower', 'volume_ratio', 'macd', 'macd_hist'
-            ]
+            # Use stored feature columns for consistency
+            if not hasattr(self, 'feature_columns'):
+                self.feature_columns = [
+                    'price_change', 'price_change_5', 'price_change_10',
+                    'volatility', 'rsi', 'close_to_sma', 'close_to_bb_upper',
+                    'close_to_bb_lower', 'volume_ratio', 'macd', 'macd_hist'
+                ]
             
-            feature_values = [features.get(col, 0) for col in feature_columns]
+            # Create feature array with consistent ordering
+            feature_values = [features.get(col, 0) for col in self.feature_columns]
             feature_array = np.array(feature_values).reshape(1, -1)
-            feature_scaled = self.scaler.transform(feature_array)
+            
+            # Create DataFrame with proper column names to avoid feature name warnings
+            import pandas as pd
+            feature_df = pd.DataFrame(feature_array, columns=self.feature_columns)
+            feature_scaled = self.scaler.transform(feature_df)
             
             prediction = model_to_use.predict(feature_scaled)[0]
             return prediction
             
         except Exception as e:
-            self.logger.error(f"Error getting ML signal: {e}")
+            self.safe_log(f"Error getting ML signal: {e}", "error")
             return 0.0
             
     def should_buy_enhanced(self, row: pd.Series, ml_signal: float) -> bool:
@@ -821,7 +871,7 @@ class BacktestEngine:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             plt.savefig(f'backtest_results/backtest_chart_{timestamp}.png', dpi=300, bbox_inches='tight')
             
-            self.console.print(f"[green]📊 Charts saved to backtest_results/backtest_chart_{timestamp}.png[/green]")
+            self.console.print(f"[green][CHART] Charts saved to backtest_results/backtest_chart_{timestamp}.png[/green]")
             
         except Exception as e:
             self.logger.error(f"Error creating plots: {e}")
@@ -831,7 +881,7 @@ async def main():
     console = Console()
     
     console.print(Panel.fit(
-        "[bold cyan]Kuvera Grid Backtesting Engine v1.1 🚀[/bold cyan]\n"
+        "[bold cyan]Kuvera Grid Backtesting Engine v1.1 [ROCKET][/bold cyan]\n"
         "[dim]Comprehensive strategy testing with performance analytics[/dim]",
         box=box.DOUBLE
     ))
@@ -846,7 +896,7 @@ async def main():
         start_date = "2024-01-01"
         end_date = "2024-12-31"
         
-        console.print(f"\n[bold]📋 Backtest Configuration:[/bold]")
+        console.print(f"\n[bold][CONFIG] Backtest Configuration:[/bold]")
         config_table = Table(box=box.ROUNDED)
         config_table.add_column("Parameter", style="cyan")
         config_table.add_column("Value", style="green")
@@ -861,24 +911,45 @@ async def main():
         
         console.print(config_table)
         
-        # Fetch historical data
-        df = engine.fetch_historical_data(symbol, interval, start_date, end_date)
-        
-        # Calculate technical indicators
-        df = engine.calculate_technical_indicators(df)
-        
-        # Prepare ML features and train model
-        df = engine.prepare_ml_features(df)
-        engine.train_ml_model(df)
-        
-        # Run backtest
+        # Execute backtest with progress tracking
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            "[progress.percentage]{task.percentage:>3.0f}%",
+            TimeElapsedColumn(),
+            console=console
+        ) as progress:
+            
+            # Step 1: Fetch historical data
+            data_task = progress.add_task("[cyan]Fetching historical data...", total=100)
+            df = engine.fetch_historical_data(symbol, interval, start_date, end_date)
+            progress.update(data_task, completed=100)
+            
+            # Step 2: Calculate technical indicators
+            indicators_task = progress.add_task("[yellow]Calculating technical indicators...", total=100)
+            df = engine.calculate_technical_indicators(df)
+            progress.update(indicators_task, completed=100)
+            
+            # Step 3: Prepare ML features
+            features_task = progress.add_task("[blue]Preparing ML features...", total=100)
+            df = engine.prepare_ml_features(df)
+            progress.update(features_task, completed=100)
+            
+            # Step 4: Train ML model
+            training_task = progress.add_task("[magenta]Training ML model...", total=100)
+            engine.train_ml_model(df)
+            progress.update(training_task, completed=100)
+            
+            # Step 5: Run backtest (this has its own progress bar)
+            console.print("\n[bold]Starting backtest execution...[/bold]")
+            
         results = engine.run_backtest(df)
         
         # Calculate performance metrics
         metrics = engine.calculate_performance_metrics(results)
         
         # Display results
-        console.print("\n[bold green]🎉 Backtest Complete![/bold green]")
+        console.print("\n[bold green][SUCCESS] Backtest Complete![/bold green]")
         engine.display_results(metrics)
         
         # Save results
@@ -888,7 +959,7 @@ async def main():
         engine.plot_results(df)
         
         # Summary
-        console.print(f"\n[bold]📊 Summary:[/bold]")
+        console.print(f"\n[bold][SUMMARY] Summary:[/bold]")
         console.print(f"Initial Capital: [green]${engine.initial_capital:,.2f}[/green]")
         console.print(f"Final Capital: [green]${results['final_capital']:,.2f}[/green]")
         console.print(f"Total Return: [green]{metrics['total_return']:.2%}[/green]")
@@ -897,12 +968,12 @@ async def main():
         console.print(f"Sharpe Ratio: [green]{metrics['sharpe_ratio']:.2f}[/green]")
         
         if metrics['total_return'] > 0:
-            console.print("\n[bold green]🚀 Strategy shows positive returns![/bold green]")
+            console.print("\n[bold green][SUCCESS] Strategy shows positive returns![/bold green]")
         else:
-            console.print("\n[bold red]⚠️  Strategy shows negative returns. Consider optimization.[/bold red]")
+            console.print("\n[bold red][WARNING] Strategy shows negative returns. Consider optimization.[/bold red]")
             
     except Exception as e:
-        console.print(f"\n[bold red]❌ Backtest failed: {e}[/bold red]")
+        console.print(f"\n[bold red][ERROR] Backtest failed: {e}[/bold red]")
         logging.error(f"Backtest error: {e}", exc_info=True)
         
 if __name__ == "__main__":
