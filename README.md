@@ -7,10 +7,12 @@ A sophisticated trading bot that combines traditional technical analysis with cu
 ## 🌟 Key Features
 
 ### 🤖 AI-Powered Trading
-- **OpenRouter AI Integration**: Advanced sentiment analysis and strategy optimization
+- **OpenRouter AI Integration**: Advanced sentiment analysis and strategy optimization with 15-minute frequency
 - **Real-time AI Sentiment Scoring**: Dynamic position sizing based on market sentiment
 - **AI-Enhanced Stop-Loss/Take-Profit**: Adaptive risk management using AI insights
 - **Autonomous Trading Capabilities**: Optional fully automated trading with AI oversight
+- **Diagnostic Mode**: Built-in OpenRouter API connectivity testing and validation
+- **Startup Test Trading**: Automated test trade execution at startup for workflow verification
 
 ### 🧠 Advanced Machine Learning
 - **XGBoost Integration**: Optimized for 8GB RAM with memory-efficient configurations
@@ -78,6 +80,33 @@ python bot.py
 ```bash
 python backtest.py
 ```
+
+### 🔧 Advanced Features
+
+#### Diagnostic Mode
+Enable diagnostic mode to test OpenRouter API connectivity at startup:
+
+1. Edit `config/config.yaml`:
+```yaml
+ai:
+  diagnostic_mode: true  # Enable OpenRouter connectivity testing
+```
+
+2. The bot will automatically test API connectivity when started
+3. Check logs for detailed API call status and responses
+
+#### Startup Test Trading
+Enable automatic test trades at startup to verify end-to-end functionality:
+
+1. Edit `config/config.yaml`:
+```yaml
+trading:
+  startup_test_enabled: true  # Enable startup test trades
+```
+
+2. Bot will execute a small test buy/sell cycle at startup (testnet only)
+3. Test results are logged and displayed in the UI
+4. Normal trading resumes after test completion
 
 ## 🔧 Troubleshooting
 

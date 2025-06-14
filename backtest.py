@@ -401,8 +401,17 @@ class BacktestEngine:
         df['close_to_bb_upper'] = (df['close'] - df['bb_upper']) / df['bb_upper']
         df['close_to_bb_lower'] = (df['close'] - df['bb_lower']) / df['bb_lower']
         
-        # Volume features
+        # Enhanced Volume features for better ML performance
         df['volume_ratio'] = df['volume'] / df['volume_sma']
+        df['volume_change'] = df['volume'].pct_change()
+        df['volume_momentum'] = df['volume'].rolling(5).mean() / df['volume'].rolling(20).mean()
+        df['price_volume_trend'] = (df['close'].pct_change() * df['volume_ratio']).rolling(5).mean()
+        df['volume_volatility'] = df['volume'].rolling(10).std() / df['volume'].rolling(10).mean()
+        
+        # Additional technical features for improved R²
+        df['rsi_momentum'] = df['rsi'].diff()
+        df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+        df['price_acceleration'] = df['close'].pct_change().diff()
         
         # Target variable (future return)
         df['future_return'] = df['close'].shift(-5).pct_change(5)
@@ -416,11 +425,15 @@ class BacktestEngine:
             
         self.console.print("[cyan]🎯 Training ML model...[/cyan]")
         
-        # Select features (store as instance variable for consistency)
+        # Enhanced feature selection with volume and technical indicators for improved R²
         self.feature_columns = [
             'price_change', 'price_change_5', 'price_change_10',
             'volatility', 'rsi', 'close_to_sma', 'close_to_bb_upper',
-            'close_to_bb_lower', 'volume_ratio', 'macd', 'macd_hist'
+            'close_to_bb_lower', 'volume_ratio', 'macd', 'macd_hist',
+            # NEW: Enhanced volume features
+            'volume_change', 'volume_momentum', 'price_volume_trend', 'volume_volatility',
+            # NEW: Additional technical features
+            'rsi_momentum', 'bb_position', 'price_acceleration'
         ]
         
         # Prepare data
@@ -490,7 +503,11 @@ class BacktestEngine:
                 self.feature_columns = [
                     'price_change', 'price_change_5', 'price_change_10',
                     'volatility', 'rsi', 'close_to_sma', 'close_to_bb_upper',
-                    'close_to_bb_lower', 'volume_ratio', 'macd', 'macd_hist'
+                    'close_to_bb_lower', 'volume_ratio', 'macd', 'macd_hist',
+                    # Enhanced volume features
+                    'volume_change', 'volume_momentum', 'price_volume_trend', 'volume_volatility',
+                    # Additional technical features
+                    'rsi_momentum', 'bb_position', 'price_acceleration'
                 ]
             
             # Create feature array with consistent ordering
@@ -510,7 +527,7 @@ class BacktestEngine:
             return 0.0
             
     def should_buy_enhanced(self, row: pd.Series, ml_signal: float) -> bool:
-        """Enhanced buy logic with multiple indicators"""
+        """Enhanced buy logic with optimized RSI thresholds and Bollinger Band sensitivity"""
         if pd.isna(row['sma_20']):
             return False
             
@@ -521,23 +538,27 @@ class BacktestEngine:
         buy_threshold = row['sma_20'] * (1 - entry_threshold)
         conditions.append(row['close'] <= buy_threshold)
         
-        # RSI oversold
+        # RSI oversold - OPTIMIZED: Changed from 30 to 40 for better entry timing
         if not pd.isna(row['rsi']):
-            conditions.append(row['rsi'] < 30)
+            conditions.append(row['rsi'] < 40)
             
-        # Price near Bollinger Band lower
+        # Price near Bollinger Band lower - OPTIMIZED: Increased sensitivity from 1.01 to 1.02
         if not pd.isna(row['bb_lower']):
-            conditions.append(row['close'] <= row['bb_lower'] * 1.01)
+            conditions.append(row['close'] <= row['bb_lower'] * 1.02)
             
-        # ML signal positive
-        if ml_signal > 0.001:  # Positive prediction
+        # ML signal positive - Enhanced threshold
+        if ml_signal > 0.002:  # Slightly higher threshold for better signal quality
             conditions.append(True)
+            
+        # Volume confirmation - NEW: Add volume-based condition
+        if not pd.isna(row.get('volume_ratio', np.nan)):
+            conditions.append(row['volume_ratio'] > 1.1)  # Above average volume
             
         # Require at least 2 conditions
         return sum(conditions) >= 2
         
     def should_sell_enhanced(self, row: pd.Series, entry_price: float, ml_signal: float) -> Tuple[bool, str]:
-        """Enhanced sell logic"""
+        """Enhanced sell logic with optimized RSI thresholds and Bollinger Band sensitivity"""
         if pd.isna(row['sma_20']):
             return False, ""
             
@@ -548,17 +569,23 @@ class BacktestEngine:
         if row['close'] >= sell_threshold:
             return True, "TAKE_PROFIT"
             
-        # RSI overbought
-        if not pd.isna(row['rsi']) and row['rsi'] > 70:
+        # RSI overbought - OPTIMIZED: Changed from 70 to 60 for better exit timing
+        if not pd.isna(row['rsi']) and row['rsi'] > 60:
             return True, "RSI_OVERBOUGHT"
             
-        # Price near Bollinger Band upper
-        if not pd.isna(row['bb_upper']) and row['close'] >= row['bb_upper'] * 0.99:
+        # Price near Bollinger Band upper - OPTIMIZED: Increased sensitivity from 0.99 to 0.98
+        if not pd.isna(row['bb_upper']) and row['close'] >= row['bb_upper'] * 0.98:
             return True, "BB_UPPER"
             
-        # ML signal negative
-        if ml_signal < -0.001:  # Negative prediction
+        # ML signal negative - Enhanced threshold
+        if ml_signal < -0.002:  # Slightly lower threshold for better signal quality
             return True, "ML_SIGNAL"
+            
+        # Volume-based exit - NEW: High volume reversal signal
+        if not pd.isna(row.get('volume_ratio', np.nan)) and row['volume_ratio'] > 2.0:
+            # High volume with price near resistance could indicate reversal
+            if not pd.isna(row['rsi']) and row['rsi'] > 55:
+                return True, "VOLUME_REVERSAL"
             
         # Stop loss condition
         stop_loss_pct = self.strategy_config['stop_loss']

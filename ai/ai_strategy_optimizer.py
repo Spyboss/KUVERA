@@ -20,11 +20,11 @@ class AIStrategyOptimizer:
         self.last_request_time = 0
         self.logger = logging.getLogger('AIOptimizer')
         
-        # AI model configurations
+        # AI model configurations - Updated to use reliable models
         self.models = {
-            'sentiment': 'google/gemma-7b-it',
+            'sentiment': 'mistralai/mistral-7b-instruct:free',
             'strategy': 'mistralai/mistral-7b-instruct:free', 
-            'anomaly': 'huggingfaceh4/zephyr-7b-beta'
+            'anomaly': 'mistralai/mistral-7b-instruct:free'
         }
         
         # Cache for AI responses
@@ -132,8 +132,11 @@ Format: SCORE:0.XX REASON:your_analysis
     async def optimize_strategy_parameters(self, current_params: Dict, performance_data: Dict) -> Dict:
         """Optimize strategy parameters using AI"""
         try:
+            self.logger.debug(f"🔧 Starting AI strategy optimization - Current params: {current_params}, Performance: {performance_data}")
+            
             cache_key = f"strategy_{hash(str(current_params))}_{hash(str(performance_data))}"
             if self._is_cached(cache_key):
+                self.logger.debug("📋 Using cached strategy optimization result")
                 return self.response_cache[cache_key]['data']
             
             win_rate = performance_data.get('win_rate', 0)
@@ -149,8 +152,11 @@ Suggest optimized parameters for better performance.
 Format: SMA:XX ENTRY:X.X EXIT:X.X STOP:X.X CONFIDENCE:XX
 """
             
+            self.logger.debug(f"🤖 Sending strategy optimization request to AI model: {self.models['strategy']}")
             response = await self._make_request(self.models['strategy'], prompt)
+            
             if response and 'SMA:' in response:
+                self.logger.debug(f"✅ AI strategy optimization response received: {response[:100]}...")
                 try:
                     # Parse AI suggestions
                     optimized = current_params.copy()
@@ -188,7 +194,10 @@ Format: SMA:XX ENTRY:X.X EXIT:X.X STOP:X.X CONFIDENCE:XX
     async def detect_market_anomaly(self, price_data: List[float], volume_data: List[float] = None) -> Tuple[bool, float, str]:
         """Detect market anomalies that might require emergency stops"""
         try:
+            self.logger.debug(f"🚨 Starting AI anomaly detection - Price data points: {len(price_data)}")
+            
             if len(price_data) < 10:
+                self.logger.debug("⚠️ Insufficient data for anomaly detection")
                 return False, 0.0, "Insufficient data"
             
             # Calculate anomaly indicators
@@ -203,8 +212,11 @@ Format: SMA:XX ENTRY:X.X EXIT:X.X STOP:X.X CONFIDENCE:XX
                 return True, 0.8, f"High volatility detected: {volatility:.1f}%"
             
             # AI analysis for subtle anomalies
+            self.logger.debug(f"📊 Anomaly indicators - Recent change: {recent_change:.2f}%, Volatility: {volatility:.2f}%")
+            
             cache_key = f"anomaly_{len(price_data)}_{recent_change:.2f}_{volatility:.2f}"
             if self._is_cached(cache_key):
+                self.logger.debug("📋 Using cached anomaly detection result")
                 cached = self.response_cache[cache_key]['data']
                 return cached['anomaly'], cached['confidence'], cached['reason']
             
@@ -218,8 +230,11 @@ Is this anomalous behavior requiring emergency action?
 Format: ANOMALY:YES/NO CONFIDENCE:XX REASON:explanation
 """
             
+            self.logger.debug(f"🤖 Sending anomaly detection request to AI model: {self.models['anomaly']}")
             response = await self._make_request(self.models['anomaly'], prompt, max_tokens=100)
+            
             if response:
+                self.logger.debug(f"✅ AI anomaly detection response received: {response[:100]}...")
                 try:
                     is_anomaly = 'ANOMALY:YES' in response.upper()
                     confidence = 0.5

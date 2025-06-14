@@ -256,6 +256,20 @@ class AutonomousTrader:
     async def _process_buy_signal(self, current_price: float, sma: float):
         """Process buy signal with AI validation"""
         try:
+            # AI anomaly detection if available
+            if self.ai_optimizer:
+                price_data = list(self.price_buffer_extended)[-50:] if len(self.price_buffer_extended) >= 50 else list(self.price_buffer_extended)
+                volume_data = list(self.volume_buffer)[-50:] if len(self.volume_buffer) >= 50 else list(self.volume_buffer)
+                
+                is_anomaly, anomaly_confidence, anomaly_reason = await self.ai_optimizer.detect_market_anomaly(
+                    price_data, volume_data
+                )
+                
+                if is_anomaly and anomaly_confidence > 0.7:
+                    self.autonomous_stats['ai_vetoed_signals'] += 1
+                    self.logger.warning(f"AI DETECTED MARKET ANOMALY - BUY SIGNAL BLOCKED: {anomaly_reason} (Confidence: {anomaly_confidence:.2f})")
+                    return
+            
             # AI validation if available
             if self.ai_optimizer and self.signal_validation_enabled:
                 should_execute, ai_confidence, reason = await self.ai_optimizer.validate_trade_signal(
@@ -283,6 +297,20 @@ class AutonomousTrader:
     async def _process_sell_signal(self, current_price: float, sma: float):
         """Process sell signal with AI validation"""
         try:
+            # AI anomaly detection if available
+            if self.ai_optimizer:
+                price_data = list(self.price_buffer_extended)[-50:] if len(self.price_buffer_extended) >= 50 else list(self.price_buffer_extended)
+                volume_data = list(self.volume_buffer)[-50:] if len(self.volume_buffer) >= 50 else list(self.volume_buffer)
+                
+                is_anomaly, anomaly_confidence, anomaly_reason = await self.ai_optimizer.detect_market_anomaly(
+                    price_data, volume_data
+                )
+                
+                if is_anomaly and anomaly_confidence > 0.7:
+                    self.autonomous_stats['ai_vetoed_signals'] += 1
+                    self.logger.warning(f"AI DETECTED MARKET ANOMALY - SELL SIGNAL BLOCKED: {anomaly_reason} (Confidence: {anomaly_confidence:.2f})")
+                    return
+            
             # AI validation if available
             if self.ai_optimizer and self.signal_validation_enabled:
                 should_execute, ai_confidence, reason = await self.ai_optimizer.validate_trade_signal(
