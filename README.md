@@ -20,43 +20,20 @@
 ## Overview
 
 Kuvera is a state-of-the-art cryptocurrency trading bot designed for BTC/USDT pairs, implementing advanced mean-reversion strategies with AI-powered market analysis. Built with institutional-grade risk management and optimized for both testing and live trading environments.
-
-### Key Capabilities
-
-| Feature | Description |
-|---------|-------------|
-| **Mean-Reversion Strategy** | Automated trading based on Simple Moving Average signals with dynamic thresholds |
-| **AI Integration** | Real-time sentiment analysis and strategy optimization using OpenRouter models |
-| **Risk Management** | Comprehensive protection with stop-loss, position sizing, and daily limits |
-| **Testnet Support** | Safe testing environment with Binance testnet integration |
-| **Real-time Processing** | WebSocket connections for live market data with auto-reconnection |
-| **Performance Analytics** | Advanced tracking with win rates, P&L analysis, and trade statistics |
+, fun crypto bot for Binance with modern CLI, advanced strategies, and gamification elements.
 
 ## Features
 
-### 🎯 **Trading Engine**
-- **Precision Trading**: 5-minute candlestick analysis with customizable SMA periods
-- **Smart Entry/Exit**: Dynamic threshold-based position management
-- **Position Sizing**: Risk-based allocation with maximum exposure controls
-- **Order Management**: Automated stop-loss and take-profit execution
-
-### 🤖 **AI Enhancement**
-- **Sentiment Analysis**: Market sentiment evaluation using advanced language models
-- **Strategy Optimization**: Dynamic parameter adjustment based on market conditions
-- **Anomaly Detection**: Identification of unusual market patterns and conditions
-- **Predictive Analytics**: Enhanced decision-making through AI-driven insights
-
-### 🛡️ **Risk Controls**
-- **Multi-layered Protection**: Stop-loss, daily limits, and emergency stops
-- **Capital Preservation**: Maximum 1% risk per trade with $0.30 absolute limit
-- **Drawdown Management**: Real-time monitoring with automatic position reduction
-- **Cooldown Periods**: Prevents overtrading in volatile market conditions
-
-### 📊 **Monitoring & Analytics**
-- **Real-time Dashboard**: Live performance metrics and trade monitoring
-- **Comprehensive Logging**: Detailed trade history with performance analysis
-- **Statistical Reporting**: Win rates, Sharpe ratios, and risk-adjusted returns
-- **Alert System**: Notifications for significant market events and trade executions
+- 📈 **Multiple Strategies**: Mean-reversion, grid trading, DCA (Dollar Cost Averaging)
+- 🤖 **AI Integration**: XGBoost ML models, sentiment analysis via OpenRouter API
+- 🎮 **Gamification**: Trading streaks, achievement badges, victory sounds
+- 🖥️ **Modern CLI**: Rich-powered dashboard with real-time metrics and controls
+- 📊 **Advanced Analytics**: RSI, Bollinger Bands, MACD indicators
+- 🛡️ **Risk Management**: Position sizing, stop-loss, daily limits, cooldown periods
+- 📡 **Real-time Data**: WebSocket integration for live market data
+- 🧪 **Comprehensive Backtesting**: Performance metrics, Sharpe ratio, drawdown analysis
+- 🔒 **Testnet Support**: Safe testing environment before live trading
+- 📈 **Performance Tracking**: Real-time equity curve and trade analytics
 
 ## Installation
 

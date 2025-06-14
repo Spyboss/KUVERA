@@ -23,6 +23,7 @@ data/
 
 # Backtest results
 backtests/
+backtest_results/
 *.png
 *.jpg
 *.jpeg

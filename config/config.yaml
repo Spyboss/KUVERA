@@ -14,10 +14,27 @@ trading:
   
 # Strategy Parameters
 strategy:
+  type: mean_reversion  # Options: mean_reversion, grid, dca
   sma_period: 20
   entry_threshold: 0.005  # 0.5% below SMA to buy
   exit_threshold: 0.005   # 0.5% above SMA to sell
   stop_loss: 0.008        # 0.8% stop loss
+  
+  # Enhanced indicators
+  params:
+    rsi_period: 14
+    bb_period: 20
+    bb_std: 2
+    
+    # Grid strategy parameters
+    grid_levels: 10
+    grid_range: 0.05  # 5% range
+    grid_risk_per_order: 0.001  # 0.1% risk per grid order
+    
+    # DCA strategy parameters
+    dca_interval: weekly
+    dca_amount: 10.0  # $10 per DCA
+    dca_trigger: -0.02  # -2% price drop trigger
   
 # Risk Management
 risk:
