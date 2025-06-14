@@ -156,11 +156,18 @@ class ModernUI:
             Layout(name="status", ratio=1)
         )
         
-    def create_header(self) -> Panel:
-        """Create header panel"""
+    def create_header(self, trading_active: bool = False) -> Panel:
+        """Create header panel with trading status"""
         title = Text("Kuvera Grid v1.1 🚀", style="bold cyan")
+        
+        # Add trading status indicator
+        status_color = "green" if trading_active else "red"
+        status_text = "ACTIVE" if trading_active else "PAUSED"
+        trading_status = Text(f" [{status_text}]", style=f"bold {status_color}")
+        
         subtitle = Text(f"Mode: {self.current_mode} | AI: {'Enabled' if self.ai_enabled else 'Disabled'} | Strategy: {self.strategy_type}", style="dim")
-        return Panel(Text.assemble(title, "\n", subtitle), box=box.ROUNDED)
+        
+        return Panel(Text.assemble(title, trading_status, "\n", subtitle), box=box.ROUNDED)
         
     def create_metrics_panel(self, trades: int, win_rate: float, profit: float, position: str, risk: float) -> Panel:
         """Create metrics panel"""
@@ -196,8 +203,8 @@ class ModernUI:
             
         return Panel(table, title="💰 Balances", box=box.ROUNDED)
         
-    def create_status_panel(self, websocket_status: str, api_status: str, target_progress: float) -> Panel:
-        """Create status panel"""
+    def create_status_panel(self, websocket_status: str, api_status: str, target_progress: float, current_price: float = None) -> Panel:
+        """Create enhanced status panel with real-time data"""
         table = Table(show_header=False, box=None, padding=(0, 1))
         table.add_column("Status", style="cyan")
         table.add_column("Value", style="green")
@@ -205,9 +212,17 @@ class ModernUI:
         table.add_row("WebSocket:", websocket_status)
         table.add_row("API:", api_status)
         
+        # Show current BTC price if available
+        if current_price:
+            table.add_row("BTC Price:", f"${current_price:,.2f}")
+        
         # Progress bar for weekly target
         progress_bar = "█" * int(target_progress * 20) + "░" * (20 - int(target_progress * 20))
         table.add_row("Target:", f"[{progress_bar}] {target_progress:.0%}")
+        
+        # Add timestamp for last update
+        current_time = datetime.now().strftime("%H:%M:%S")
+        table.add_row("Updated:", current_time)
         
         return Panel(table, title="🔧 Status", box=box.ROUNDED)
         
@@ -233,8 +248,10 @@ class ModernUI:
         return Panel(controls, box=box.ROUNDED)
         
     def update_display(self, bot_data: dict, gamification: GameificationManager):
-        """Update the display with current data"""
-        self.layout["header"].update(self.create_header())
+        """Update the display with current data and real-time status"""
+        trading_active = bot_data.get('trading_active', False)
+        
+        self.layout["header"].update(self.create_header(trading_active))
         self.layout["metrics"].update(self.create_metrics_panel(
             bot_data.get('trades', 0),
             bot_data.get('win_rate', 0),
@@ -246,7 +263,8 @@ class ModernUI:
         self.layout["status"].update(self.create_status_panel(
             bot_data.get('websocket_status', 'Disconnected'),
             bot_data.get('api_status', 'Unknown'),
-            bot_data.get('target_progress', 0)
+            bot_data.get('target_progress', 0),
+            bot_data.get('current_price')
         ))
         self.layout["right"].update(self.create_gamification_panel(gamification))
         self.layout["footer"].update(self.create_footer())
@@ -273,6 +291,7 @@ class EnhancedTradingBot:
         # Trading state
         self.symbol = self.config['trading']['symbol']
         self.is_running = False
+        self.trading_active = False
         self.position = None
         self.entry_price = None
         self.last_trade_time = None
@@ -294,6 +313,10 @@ class EnhancedTradingBot:
         # WebSocket client
         self.ws_client = None
         
+        # Balance caching for real-time updates
+        self._cached_balances = None
+        self._last_balance_update = 0
+        
         # AI/ML components
         self.ml_model = None
         self.scaler = None
@@ -304,21 +327,37 @@ class EnhancedTradingBot:
         self.week_start_profit = self.total_profit
         
     def setup_logging(self):
-        """Setup logging configuration"""
+        """Setup logging configuration with UTF-8 encoding"""
         os.makedirs('logs', exist_ok=True)
         
         log_level = getattr(logging, self.config['monitoring']['log_level'])
         
+        # Create file handler with UTF-8 encoding to handle Unicode characters like 🚀
+        file_handler = logging.FileHandler(
+            f'logs/bot_{datetime.now().strftime("%Y%m%d")}.log',
+            encoding='utf-8'
+        )
+        file_handler.setLevel(log_level)
+        
+        # Create console handler with UTF-8 encoding
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(log_level)
+        
+        # Create formatter
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        file_handler.setFormatter(formatter)
+        console_handler.setFormatter(formatter)
+        
+        # Configure root logger
         logging.basicConfig(
             level=log_level,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(f'logs/bot_{datetime.now().strftime("%Y%m%d")}.log'),
-                logging.StreamHandler()
-            ]
+            handlers=[file_handler, console_handler]
         )
         
         self.logger = logging.getLogger('KuveraBot')
+        self.logger.info("Logging system initialized with UTF-8 encoding 🚀")
         
     def setup_binance_client(self):
         """Setup Binance API client"""
@@ -357,18 +396,72 @@ class EnhancedTradingBot:
             raise
             
     def setup_ml_components(self):
-        """Setup machine learning components"""
-        if xgb and StandardScaler:
-            self.ml_model = xgb.XGBRegressor(
-                n_estimators=100,
-                max_depth=6,
-                learning_rate=0.1,
-                random_state=42
-            )
-            self.scaler = StandardScaler()
-            self.logger.info("ML components initialized")
-        else:
-            self.logger.warning("ML libraries not available, using basic strategy")
+        """Setup ML components with enhanced fallback strategy"""
+        try:
+            # Check if XGBoost and sklearn are available
+            if xgb and StandardScaler:
+                self.ml_model = xgb.XGBRegressor(
+                    n_estimators=50,  # Reduced for 8GB RAM optimization
+                    max_depth=4,      # Reduced depth for memory efficiency
+                    learning_rate=0.1,
+                    random_state=42,
+                    n_jobs=1          # Single thread for memory efficiency
+                )
+                self.scaler = StandardScaler()
+                self.ml_enabled = True
+                self.logger.info("🤖 XGBoost ML components initialized successfully (RAM optimized)")
+                
+                # Try to train on sample data if available
+                self.train_ml_model()
+            else:
+                self.ml_enabled = False
+                self.logger.warning("⚠️ XGBoost not available, using Enhanced Mean Reversion with RSI/Bollinger Bands")
+                
+        except ImportError as e:
+            self.ml_enabled = False
+            self.logger.warning(f"⚠️ ML libraries missing: {e}. Install with: pip install xgboost scikit-learn")
+        except Exception as e:
+            self.ml_enabled = False
+            self.logger.error(f"❌ Error setting up ML components: {e}")
+            
+    def train_ml_model(self):
+        """Train ML model on recent price data (memory optimized for 8GB RAM)"""
+        try:
+            if not self.ml_enabled or len(self.price_buffer) < 100:
+                return
+                
+            # Use only recent data to save memory (last 1000 points)
+            recent_prices = list(self.price_buffer)[-1000:] if len(self.price_buffer) > 1000 else list(self.price_buffer)
+            
+            if len(recent_prices) < 50:
+                return
+                
+            # Create features (simple technical indicators)
+            features = []
+            targets = []
+            
+            for i in range(20, len(recent_prices) - 1):  # Need 20 periods for indicators
+                price_slice = recent_prices[i-20:i]
+                current_price = recent_prices[i]
+                next_price = recent_prices[i+1]
+                
+                # Simple features to save memory
+                sma_5 = sum(price_slice[-5:]) / 5
+                sma_20 = sum(price_slice) / 20
+                price_change = (current_price - price_slice[-2]) / price_slice[-2]
+                
+                features.append([current_price, sma_5, sma_20, price_change])
+                targets.append(next_price)
+                
+            if len(features) > 30:  # Minimum data for training
+                X = self.scaler.fit_transform(features)
+                y = targets
+                
+                self.ml_model.fit(X, y)
+                self.logger.info(f"🎯 ML model trained on {len(features)} samples (memory optimized)")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error training ML model: {e}")
             
     def calculate_technical_indicators(self, prices: List[float]) -> Dict[str, float]:
         """Calculate technical indicators"""
@@ -399,8 +492,16 @@ class EnhancedTradingBot:
             
         return indicators
         
-    def get_account_balances(self) -> Dict[str, float]:
-        """Get account balances"""
+    def get_account_balances(self, force_refresh: bool = False) -> Dict[str, float]:
+        """Get account balances with caching for real-time updates"""
+        current_time = time.time()
+        
+        # Use cached balances if available and not expired (unless force refresh)
+        if (not force_refresh and 
+            self._cached_balances is not None and 
+            current_time - self._last_balance_update < 5):
+            return self._cached_balances
+            
         try:
             account_info = self.client.account(recvWindow=60000)
             balances = {}
@@ -410,18 +511,31 @@ class EnhancedTradingBot:
                 if free_balance > 0:
                     balances[balance['asset']] = free_balance
                     
+            # Cache the results
+            self._cached_balances = balances
+            self._last_balance_update = current_time
+            
             return balances
         except Exception as e:
             self.logger.error(f"Error getting balances: {e}")
-            return {}
+            # Return cached balances if available, otherwise empty dict
+            return self._cached_balances if self._cached_balances else {}
             
     def get_bot_data(self) -> dict:
-        """Get current bot data for UI display"""
+        """Get current bot data for UI display with real-time updates"""
         win_rate = (self.winning_trades / self.trade_count * 100) if self.trade_count > 0 else 0
         
         # Calculate weekly progress
         weekly_profit = self.total_profit - self.week_start_profit
-        target_progress = min(weekly_profit / self.weekly_target, 1.0)
+        target_progress = min(weekly_profit / self.weekly_target, 1.0) if self.weekly_target > 0 else 0
+        
+        # Determine API status
+        api_status = "OK"
+        try:
+            # Quick ping to check API status
+            self.client.ping()
+        except:
+            api_status = "ERROR"
         
         return {
             'trades': self.trade_count,
@@ -431,8 +545,9 @@ class EnhancedTradingBot:
             'risk': self.config['trading']['risk_per_trade'] * 100,
             'balances': self.get_account_balances(),
             'websocket_status': 'Connected (btcusdt@kline_5m)' if self.ws_client else 'Disconnected',
-            'api_status': 'OK',
-            'target_progress': target_progress
+            'api_status': api_status,
+            'target_progress': target_progress,
+            'current_price': self.current_price
         }
         
     def should_buy_enhanced(self, current_price: float, indicators: Dict[str, float]) -> bool:
@@ -525,24 +640,28 @@ class EnhancedTradingBot:
             self.logger.error(f"Kline error: {e}")
             
     async def process_enhanced_signals(self, current_price: float, indicators: Dict[str, float]):
-        """Process enhanced trading signals"""
+        """Process enhanced trading signals with active trading check"""
         try:
+            # Only process signals if trading is active
+            if not getattr(self, 'trading_active', False):
+                return
+                
             # Check buy signal
             if self.should_buy_enhanced(current_price, indicators):
-                self.logger.info(f"BUY SIGNAL: Price ${current_price:.2f}")
+                self.logger.info(f"🟢 BUY SIGNAL: Price ${current_price:.2f} - Indicators: {indicators}")
                 await self.place_buy_order(current_price)
                 
             # Check sell signal
             should_sell, reason = self.should_sell_enhanced(current_price, indicators)
             if should_sell:
-                self.logger.info(f"SELL SIGNAL ({reason}): Price ${current_price:.2f}")
+                self.logger.info(f"🔴 SELL SIGNAL ({reason}): Price ${current_price:.2f}")
                 await self.place_sell_order(reason)
                 
         except Exception as e:
             self.logger.error(f"Error processing signals: {e}")
             
     def should_sell_enhanced(self, current_price: float, indicators: Dict[str, float]) -> Tuple[bool, str]:
-        """Enhanced sell logic"""
+        """Enhanced sell logic with dynamic stop-loss and take-profit levels"""
         if not self.position or not self.entry_price:
             return False, ""
             
@@ -550,39 +669,50 @@ class EnhancedTradingBot:
         rsi = indicators.get('rsi')
         bb_upper = indicators.get('bb_upper')
         
-        # Take profit condition
-        if sma:
-            exit_threshold = self.config['strategy']['exit_threshold']
-            sell_threshold = sma * (1 + exit_threshold)
-            
-            if current_price >= sell_threshold:
-                return True, "TAKE_PROFIT"
-                
-        # RSI overbought
-        if rsi and rsi > 70:
-            return True, "RSI_OVERBOUGHT"
-            
-        # Price near Bollinger Band upper
-        if bb_upper and current_price >= bb_upper * 0.99:
-            return True, "BB_UPPER"
-            
-        # Stop loss condition
-        stop_loss_pct = self.config['strategy']['stop_loss']
-        stop_loss_price = self.entry_price * (1 - stop_loss_pct)
+        # Use position-specific stop-loss and take-profit levels
+        stop_loss_price = self.position.get('stop_loss', self.entry_price * (1 - self.config['strategy']['stop_loss']))
+        take_profit_price = self.position.get('take_profit', self.entry_price * 1.005)
         
+        # Take profit - use position-specific level
+        if current_price >= take_profit_price:
+            return True, "TAKE_PROFIT"
+            
+        # Stop loss - use position-specific level
         if current_price <= stop_loss_price:
             return True, "STOP_LOSS"
+            
+        # RSI overbought (additional exit condition)
+        if rsi and rsi > 75:  # Slightly higher threshold for more selective exits
+            return True, "RSI_OVERBOUGHT"
+            
+        # Price near Bollinger Band upper (additional exit condition)
+        if bb_upper and current_price >= bb_upper * 0.998:
+            return True, "BB_UPPER"
+            
+        # Time-based exit (if position held too long - 4 hours)
+        if 'entry_time' in self.position:
+            time_held = (datetime.now() - self.position['entry_time']).total_seconds() / 3600
+            if time_held > 4:  # 4 hours
+                return True, "TIME_EXIT"
             
         return False, ""
         
     async def place_buy_order(self, current_price: float):
-        """Place a buy order with gamification"""
+        """Place a buy order with enhanced logging and risk management"""
         try:
             position_size = self.calculate_position_size(current_price)
             
             if position_size <= 0:
+                self.logger.warning(f"Position size too small: {position_size}")
                 return
                 
+            # Calculate stop-loss and take-profit levels
+            stop_loss_pct = self.config['strategy']['stop_loss']
+            take_profit_pct = 0.005  # 0.5% take profit
+            
+            stop_loss_price = current_price * (1 - stop_loss_pct)
+            take_profit_price = current_price * (1 + take_profit_pct)
+            
             order = self.client.new_order(
                 symbol=self.symbol,
                 side='BUY',
@@ -593,19 +723,27 @@ class EnhancedTradingBot:
             self.position = {
                 'side': 'BUY',
                 'quantity': position_size,
-                'order_id': order['orderId']
+                'order_id': order['orderId'],
+                'entry_time': datetime.now(),
+                'stop_loss': stop_loss_price,
+                'take_profit': take_profit_price
             }
             
             self.entry_price = current_price
             self.daily_trades += 1
             
-            self.logger.info(f"BUY ORDER PLACED: {position_size:.6f} {self.symbol} at ${current_price:.2f}")
+            # Enhanced logging with trade details
+            self.logger.info(
+                f"💰 BUY ORDER EXECUTED: {position_size:.6f} {self.symbol} at ${current_price:.2f} | "
+                f"Stop Loss: ${stop_loss_price:.2f} | Take Profit: ${take_profit_price:.2f} | "
+                f"Risk: ${(current_price - stop_loss_price) * position_size:.2f}"
+            )
             
         except Exception as e:
-            self.logger.error(f"Error placing buy order: {e}")
+            self.logger.error(f"❌ Error placing buy order: {e}")
             
     async def place_sell_order(self, reason: str):
-        """Place a sell order with gamification"""
+        """Place a sell order with enhanced trade tracking and profit calculation"""
         try:
             if not self.position:
                 return
@@ -619,8 +757,15 @@ class EnhancedTradingBot:
                 quantity=quantity
             )
             
+            # Calculate detailed trade metrics
+            entry_time = self.position.get('entry_time', datetime.now())
+            exit_time = datetime.now()
+            trade_duration = (exit_time - entry_time).total_seconds() / 60  # minutes
+            
             current_price = self.current_price
             profit = (current_price - self.entry_price) * quantity
+            profit_pct = ((current_price - self.entry_price) / self.entry_price) * 100
+            
             self.total_profit += profit
             self.trade_count += 1
             
@@ -628,6 +773,7 @@ class EnhancedTradingBot:
             if profit > 0:
                 self.winning_trades += 1
                 self.gamification.add_win()
+                trade_result = "WIN 🎉"
                 # Play success sound in testnet
                 if self.ui.current_mode == "Testnet" and playsound:
                     try:
@@ -638,19 +784,27 @@ class EnhancedTradingBot:
             else:
                 self.daily_loss += abs(profit)
                 self.gamification.add_loss()
+                trade_result = "LOSS 📉"
                 
             # Check for badges
             self.gamification.check_trade_milestones(self.trade_count, self.total_profit)
+            
+            # Enhanced logging with complete trade details
+            self.logger.info(
+                f"💸 SELL ORDER EXECUTED: {quantity:.6f} {self.symbol} at ${current_price:.2f} | "
+                f"Entry: ${self.entry_price:.2f} | Exit: ${current_price:.2f} | "
+                f"Profit: ${profit:.2f} ({profit_pct:+.2f}%) | Duration: {trade_duration:.1f}m | "
+                f"Result: {trade_result} | Reason: {reason} | "
+                f"Total P&L: ${self.total_profit:.2f} | Win Rate: {(self.winning_trades/self.trade_count)*100:.1f}%"
+            )
             
             # Reset position
             self.position = None
             self.entry_price = None
             self.last_trade_time = datetime.now()
             
-            self.logger.info(f"SELL ORDER ({reason}): Profit ${profit:.2f} | Total: ${self.total_profit:.2f}")
-            
         except Exception as e:
-            self.logger.error(f"Error placing sell order: {e}")
+            self.logger.error(f"❌ Error placing sell order: {e}")
             
     def calculate_position_size(self, current_price: float) -> float:
         """Calculate position size based on risk management"""
@@ -698,9 +852,10 @@ class EnhancedTradingBot:
             self.logger.error(f"WebSocket error: {e}")
             
     async def run_with_ui(self):
-        """Run bot with modern UI"""
+        """Run bot with modern UI and real-time updates"""
         self.logger.info("Starting Kuvera Grid v1.1 🚀")
         self.is_running = True
+        self.trading_active = False
         
         # Start WebSocket
         await self.start_websocket()
@@ -708,26 +863,51 @@ class EnhancedTradingBot:
         # Setup keyboard listener
         def on_key_press(key):
             if key.name == 's':
-                self.is_running = not self.is_running
+                self.trading_active = not self.trading_active
+                status = "STARTED" if self.trading_active else "STOPPED"
+                self.logger.info(f"Trading {status} by user")
             elif key.name == 'm':
-                # Toggle mode (for demo purposes)
-                pass
+                # Toggle between testnet and live mode display (demo)
+                current = self.ui.current_mode
+                self.ui.current_mode = "LIVE" if current == "Testnet" else "Testnet"
+                self.logger.info(f"Display mode switched to {self.ui.current_mode}")
             elif key.name == 'q':
                 self.is_running = False
+                self.logger.info("Shutdown requested by user")
                 
         keyboard.on_press(on_key_press)
         
-        # Main UI loop
-        with Live(self.ui.layout, refresh_per_second=1, screen=True) as live:
+        # Initialize balance refresh timer
+        last_balance_refresh = 0
+        balance_refresh_interval = 5  # 5 seconds
+        
+        # Main UI loop with enhanced real-time updates
+        with Live(self.ui.layout, refresh_per_second=2, screen=True) as live:
             while self.is_running:
                 try:
+                    current_time = time.time()
+                    
+                    # Refresh balances every 5 seconds
+                    if current_time - last_balance_refresh >= balance_refresh_interval:
+                        last_balance_refresh = current_time
+                        # Force balance refresh
+                        self._cached_balances = None
+                    
+                    # Get updated bot data
                     bot_data = self.get_bot_data()
+                    bot_data['trading_active'] = self.trading_active
+                    
+                    # Update UI display
                     self.ui.update_display(bot_data, self.gamification)
-                    await asyncio.sleep(1)
+                    
+                    # Sleep for smoother updates
+                    await asyncio.sleep(0.5)
+                    
                 except KeyboardInterrupt:
                     break
                 except Exception as e:
                     self.logger.error(f"UI error: {e}")
+                    await asyncio.sleep(1)
                     
         await self.stop()
         
