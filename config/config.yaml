@@ -42,11 +42,16 @@ risk:
   max_daily_loss: 1.0  # Maximum daily loss in USDT
   cooldown_period: 300  # 5 minutes between trades
   
-# Monitoring
+# AI Configuration
+ai:
+  openrouter: true  # Enable/disable OpenRouter AI features
+  frequency: 15m    # AI analysis frequency
+
+# Monitoring and alerts
 monitoring:
-  profit_alert_threshold: 1.0  # Alert when profit reaches $1
-  drawdown_alert_threshold: 0.5  # Alert when drawdown exceeds $0.50
-  log_level: "INFO"
+  log_level: INFO
+  performance_threshold: 0.05  # 5% performance drop alert
+  balance_alert_threshold: 0.1  # Alert if balance drops 10%
   
 # Backtesting
 backtest:

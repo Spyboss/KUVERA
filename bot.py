@@ -37,11 +37,21 @@ import threading
 try:
     import xgboost as xgb
     from sklearn.preprocessing import StandardScaler
+    from sklearn.model_selection import GridSearchCV
     import talib
 except ImportError:
     xgb = None
     StandardScaler = None
+    GridSearchCV = None
     talib = None
+
+# Import AI components
+try:
+    from ai.ai_strategy_optimizer import AIStrategyOptimizer
+    from ai.auto_trader import AutonomousTrader
+except ImportError:
+    AIStrategyOptimizer = None
+    AutonomousTrader = None
 
 # Gamification imports
 try:
@@ -156,8 +166,8 @@ class ModernUI:
             Layout(name="status", ratio=1)
         )
         
-    def create_header(self, trading_active: bool = False) -> Panel:
-        """Create header panel with trading status"""
+    def create_header(self, trading_active: bool = False, ai_sentiment: float = None) -> Panel:
+        """Create header panel with trading status and AI information"""
         title = Text("Kuvera Grid v1.1 🚀", style="bold cyan")
         
         # Add trading status indicator
@@ -165,7 +175,13 @@ class ModernUI:
         status_text = "ACTIVE" if trading_active else "PAUSED"
         trading_status = Text(f" [{status_text}]", style=f"bold {status_color}")
         
-        subtitle = Text(f"Mode: {self.current_mode} | AI: {'Enabled' if self.ai_enabled else 'Disabled'} | Strategy: {self.strategy_type}", style="dim")
+        # Enhanced subtitle with AI sentiment
+        ai_status = "Enabled" if self.ai_enabled else "Disabled"
+        if self.ai_enabled and ai_sentiment is not None:
+            sentiment_emoji = "📈" if ai_sentiment > 0.6 else "📉" if ai_sentiment < 0.4 else "➡️"
+            ai_status += f" {sentiment_emoji} ({ai_sentiment:.2f})"
+        
+        subtitle = Text(f"Mode: {self.current_mode} | AI: {ai_status} | Strategy: {self.strategy_type}", style="dim")
         
         return Panel(Text.assemble(title, trading_status, "\n", subtitle), box=box.ROUNDED)
         
@@ -250,8 +266,9 @@ class ModernUI:
     def update_display(self, bot_data: dict, gamification: GameificationManager):
         """Update the display with current data and real-time status"""
         trading_active = bot_data.get('trading_active', False)
+        ai_sentiment = bot_data.get('ai_sentiment', None)
         
-        self.layout["header"].update(self.create_header(trading_active))
+        self.layout["header"].update(self.create_header(trading_active, ai_sentiment))
         self.layout["metrics"].update(self.create_metrics_panel(
             bot_data.get('trades', 0),
             bot_data.get('win_rate', 0),
@@ -321,6 +338,16 @@ class EnhancedTradingBot:
         self.ml_model = None
         self.scaler = None
         self.setup_ml_components()
+        
+        # OpenRouter AI Integration
+        self.openrouter_api_key = os.getenv('OPENROUTER_API_KEY')
+        self.ai_optimizer = None
+        self.auto_trader = None
+        self.ai_enabled = self.config.get('ai', {}).get('openrouter', False)
+        self.ai_sentiment_score = 0.5  # Neutral
+        
+        # Setup AI components after ML components
+        self.setup_ai_components()
         
         # Weekly target tracking
         self.weekly_target = 2.0  # $2 per week
@@ -463,6 +490,38 @@ class EnhancedTradingBot:
         except Exception as e:
             self.logger.error(f"❌ Error training ML model: {e}")
             
+    def setup_ai_components(self):
+        """Setup OpenRouter AI components for enhanced trading decisions"""
+        try:
+            if self.openrouter_api_key and AIStrategyOptimizer and AutonomousTrader:
+                # Initialize AI Strategy Optimizer
+                self.ai_optimizer = AIStrategyOptimizer(self.openrouter_api_key)
+                
+                # Initialize Autonomous Trader
+                self.auto_trader = AutonomousTrader(
+                    bot_instance=self,
+                    config=self.config,
+                    openrouter_api_key=self.openrouter_api_key
+                )
+                
+                self.ai_enabled = True
+                self.logger.info("🤖 OpenRouter AI components initialized successfully")
+                self.logger.info(f"🎯 AI confidence threshold: {self.config.get('ai', {}).get('confidence_threshold', 0.7):.1%}")
+                
+            elif not self.openrouter_api_key:
+                self.ai_enabled = False
+                self.logger.warning("⚠️ OpenRouter API key not found - AI features disabled")
+                self.logger.info("💡 Add OPENROUTER_API_KEY to .env to enable AI features")
+                
+            else:
+                self.ai_enabled = False
+                self.logger.warning("⚠️ AI modules not available - check ai/ directory")
+                
+        except Exception as e:
+            self.ai_enabled = False
+            self.logger.error(f"❌ Error setting up AI components: {e}")
+            self.logger.info("🔄 Continuing with standard trading strategy")
+            
     def calculate_technical_indicators(self, prices: List[float]) -> Dict[str, float]:
         """Calculate technical indicators"""
         if len(prices) < 20 or not talib:
@@ -547,11 +606,12 @@ class EnhancedTradingBot:
             'websocket_status': 'Connected (btcusdt@kline_5m)' if self.ws_client else 'Disconnected',
             'api_status': api_status,
             'target_progress': target_progress,
-            'current_price': self.current_price
+            'current_price': self.current_price,
+            'ai_sentiment': self.ai_sentiment_score if self.ai_enabled else None
         }
         
-    def should_buy_enhanced(self, current_price: float, indicators: Dict[str, float]) -> bool:
-        """Enhanced buy logic with multiple indicators"""
+    async def should_buy_enhanced(self, current_price: float, indicators: Dict[str, float]) -> bool:
+        """Enhanced buy logic with AI, ML and multiple indicators"""
         if self.position or not indicators:
             return False
             
@@ -592,8 +652,65 @@ class EnhancedTradingBot:
         if bb_lower:
             conditions.append(current_price <= bb_lower * 1.01)
             
-        # Require at least 2 conditions
-        return sum(conditions) >= 2
+        # ML prediction if available
+        ml_signal = False
+        if self.ml_enabled and self.ml_model and len(self.price_buffer) >= 20:
+            try:
+                prices = list(self.price_buffer)
+                # Prepare features for prediction
+                sma_5 = sum(prices[-5:]) / 5
+                sma_20 = sum(prices[-20:]) / 20
+                price_change = (current_price - prices[-2]) / prices[-2]
+                
+                features = [[current_price, sma_5, sma_20, price_change]]
+                features_scaled = self.scaler.transform(features)
+                
+                predicted_price = self.ml_model.predict(features_scaled)[0]
+                ml_signal = predicted_price > current_price * 1.005  # 0.5% upside prediction
+                
+            except Exception as e:
+                self.logger.error(f"ML prediction error: {e}")
+        
+        # AI sentiment analysis if available
+        ai_signal = True  # Default to neutral
+        ai_confidence = 0.5
+        
+        if self.ai_enabled and self.ai_optimizer:
+            try:
+                # Get AI sentiment and strategy recommendation
+                market_data = {
+                    'price': current_price,
+                    'rsi': rsi or 50,
+                    'bb_position': (current_price - bb_lower) / (indicators.get('bb_upper', current_price) - bb_lower) if bb_lower else 0.5,
+                    'sma_ratio': current_price / sma if sma else 1.0,
+                    'volume_trend': 'neutral'  # Simplified for now
+                }
+                
+                ai_analysis = await self.ai_optimizer.analyze_market_sentiment(market_data)
+                if ai_analysis:
+                    ai_confidence = ai_analysis.get('confidence', 0.5)
+                    ai_signal = ai_analysis.get('recommendation') == 'buy' and ai_confidence > 0.6
+                    self.ai_sentiment_score = ai_analysis.get('sentiment_score', 0.5)
+                    
+                    self.logger.info(f"🤖 AI Analysis - Sentiment: {self.ai_sentiment_score:.2f}, Confidence: {ai_confidence:.2f}, Signal: {'BUY' if ai_signal else 'HOLD'}")
+                    
+            except Exception as e:
+                self.logger.error(f"AI analysis error: {e}")
+        
+        # Combine signals with AI weighting
+        technical_conditions_met = sum(conditions) >= 2
+        
+        if self.ai_enabled and ai_confidence > 0.6:
+            # AI-enhanced decision
+            final_signal = technical_conditions_met and ai_signal and (ml_signal if self.ml_enabled else True)
+            if final_signal:
+                self.logger.info(f"🎯 Strong BUY signal - Technical: ✓, AI: ✓ (conf: {ai_confidence:.2f}), ML: {'✓' if ml_signal else '✗'}")
+        elif self.ml_enabled:
+            final_signal = technical_conditions_met and ml_signal
+        else:
+            final_signal = technical_conditions_met
+            
+        return final_signal
         
     def handle_kline_data(self, ws_client, message):
         """Handle incoming kline data from WebSocket"""
@@ -640,19 +757,28 @@ class EnhancedTradingBot:
             self.logger.error(f"Kline error: {e}")
             
     async def process_enhanced_signals(self, current_price: float, indicators: Dict[str, float]):
-        """Process enhanced trading signals with active trading check"""
+        """Process enhanced trading signals with AI integration and active trading check"""
         try:
             # Only process signals if trading is active
             if not getattr(self, 'trading_active', False):
                 return
                 
-            # Check buy signal
-            if self.should_buy_enhanced(current_price, indicators):
+            # Check buy signal with AI integration
+            if await self.should_buy_enhanced(current_price, indicators):
                 self.logger.info(f"🟢 BUY SIGNAL: Price ${current_price:.2f} - Indicators: {indicators}")
-                await self.place_buy_order(current_price)
                 
-            # Check sell signal
-            should_sell, reason = self.should_sell_enhanced(current_price, indicators)
+                # Calculate dynamic position size based on AI confidence if available
+                position_size = self.calculate_position_size(current_price)
+                if self.ai_enabled and hasattr(self, 'ai_sentiment_score'):
+                    # Adjust position size based on AI confidence
+                    confidence_multiplier = min(1.2, max(0.8, self.ai_sentiment_score * 2))
+                    position_size *= confidence_multiplier
+                    self.logger.info(f"🤖 AI-adjusted position size: {position_size:.6f} (confidence: {self.ai_sentiment_score:.2f})")
+                
+                await self.place_buy_order(current_price, position_size)
+                
+            # Check sell signal with AI-enhanced logic
+            should_sell, reason = await self.should_sell_enhanced(current_price, indicators)
             if should_sell:
                 self.logger.info(f"🔴 SELL SIGNAL ({reason}): Price ${current_price:.2f}")
                 await self.place_sell_order(reason)
@@ -660,8 +786,8 @@ class EnhancedTradingBot:
         except Exception as e:
             self.logger.error(f"Error processing signals: {e}")
             
-    def should_sell_enhanced(self, current_price: float, indicators: Dict[str, float]) -> Tuple[bool, str]:
-        """Enhanced sell logic with dynamic stop-loss and take-profit levels"""
+    async def should_sell_enhanced(self, current_price: float, indicators: Dict[str, float]) -> Tuple[bool, str]:
+        """Enhanced sell logic with AI analysis and dynamic stop-loss/take-profit levels"""
         if not self.position or not self.entry_price:
             return False, ""
             
@@ -669,17 +795,57 @@ class EnhancedTradingBot:
         rsi = indicators.get('rsi')
         bb_upper = indicators.get('bb_upper')
         
-        # Use position-specific stop-loss and take-profit levels
-        stop_loss_price = self.position.get('stop_loss', self.entry_price * (1 - self.config['strategy']['stop_loss']))
-        take_profit_price = self.position.get('take_profit', self.entry_price * 1.005)
+        # AI-enhanced dynamic stop-loss and take-profit levels
+        base_stop_loss = self.config['strategy']['stop_loss']
+        base_take_profit = 0.005  # 0.5% default
         
-        # Take profit - use position-specific level
+        # Adjust levels based on AI sentiment if available
+        if self.ai_enabled and hasattr(self, 'ai_sentiment_score'):
+            # More aggressive take-profit in bullish sentiment, tighter stop-loss in bearish
+            sentiment_adjustment = (self.ai_sentiment_score - 0.5) * 0.5  # -0.25 to +0.25
+            base_take_profit += sentiment_adjustment * 0.01  # Adjust by up to 1%
+            base_stop_loss -= sentiment_adjustment * 0.002  # Adjust stop-loss by up to 0.2%
+            
+        stop_loss_price = self.position.get('stop_loss', self.entry_price * (1 - base_stop_loss))
+        take_profit_price = self.position.get('take_profit', self.entry_price * (1 + base_take_profit))
+        
+        # AI sell signal analysis
+        ai_sell_signal = False
+        ai_confidence = 0.5
+        
+        if self.ai_enabled and self.ai_optimizer:
+            try:
+                market_data = {
+                    'price': current_price,
+                    'entry_price': self.entry_price,
+                    'profit_pct': (current_price - self.entry_price) / self.entry_price,
+                    'rsi': rsi or 50,
+                    'bb_position': (current_price - indicators.get('bb_lower', current_price)) / (bb_upper - indicators.get('bb_lower', current_price)) if bb_upper else 0.5,
+                    'sma_ratio': current_price / sma if sma else 1.0
+                }
+                
+                ai_analysis = await self.ai_optimizer.analyze_exit_strategy(market_data)
+                if ai_analysis:
+                    ai_confidence = ai_analysis.get('confidence', 0.5)
+                    ai_sell_signal = ai_analysis.get('recommendation') == 'sell' and ai_confidence > 0.7
+                    
+                    if ai_sell_signal:
+                        self.logger.info(f"🤖 AI recommends SELL - Confidence: {ai_confidence:.2f}")
+                        
+            except Exception as e:
+                self.logger.error(f"AI exit analysis error: {e}")
+        
+        # Take profit - use AI-adjusted level
         if current_price >= take_profit_price:
             return True, "TAKE_PROFIT"
             
-        # Stop loss - use position-specific level
+        # Stop loss - use AI-adjusted level
         if current_price <= stop_loss_price:
             return True, "STOP_LOSS"
+            
+        # AI-driven exit signal
+        if ai_sell_signal and ai_confidence > 0.8:
+            return True, "AI_SIGNAL"
             
         # RSI overbought (additional exit condition)
         if rsi and rsi > 75:  # Slightly higher threshold for more selective exits
@@ -697,18 +863,41 @@ class EnhancedTradingBot:
             
         return False, ""
         
-    async def place_buy_order(self, current_price: float):
-        """Place a buy order with enhanced logging and risk management"""
+    async def place_buy_order(self, current_price: float, position_size: float = None):
+        """Place a buy order with AI-enhanced logging and risk management"""
         try:
-            position_size = self.calculate_position_size(current_price)
+            # Risk management checks
+            if self.daily_trades >= self.config['risk']['max_daily_trades']:
+                self.logger.warning("Daily trade limit reached")
+                return
+                
+            if self.daily_loss >= self.config['risk']['max_daily_loss']:
+                self.logger.warning("Daily loss limit reached")
+                return
+                
+            # Use provided position size or calculate it
+            if position_size is None:
+                position_size = self.calculate_position_size(current_price)
             
             if position_size <= 0:
                 self.logger.warning(f"Position size too small: {position_size}")
                 return
                 
-            # Calculate stop-loss and take-profit levels
-            stop_loss_pct = self.config['strategy']['stop_loss']
-            take_profit_pct = 0.005  # 0.5% take profit
+            # AI-enhanced stop-loss and take-profit levels
+            base_stop_loss_pct = self.config['strategy']['stop_loss']
+            base_take_profit_pct = 0.005  # 0.5% default take profit
+            
+            # Adjust levels based on AI sentiment if available
+            if self.ai_enabled and hasattr(self, 'ai_sentiment_score'):
+                # More aggressive take-profit in bullish sentiment, tighter stop-loss in bearish
+                sentiment_adjustment = (self.ai_sentiment_score - 0.5) * 0.5  # -0.25 to +0.25
+                take_profit_pct = base_take_profit_pct + (sentiment_adjustment * 0.01)  # Adjust by up to 1%
+                stop_loss_pct = base_stop_loss_pct - (sentiment_adjustment * 0.002)  # Adjust stop-loss by up to 0.2%
+                
+                self.logger.info(f"🤖 AI-adjusted levels - TP: {take_profit_pct:.3%}, SL: {stop_loss_pct:.3%} (sentiment: {self.ai_sentiment_score:.2f})")
+            else:
+                take_profit_pct = base_take_profit_pct
+                stop_loss_pct = base_stop_loss_pct
             
             stop_loss_price = current_price * (1 - stop_loss_pct)
             take_profit_price = current_price * (1 + take_profit_pct)
@@ -732,18 +921,30 @@ class EnhancedTradingBot:
             self.entry_price = current_price
             self.daily_trades += 1
             
-            # Enhanced logging with trade details
+            # Enhanced logging with AI and trade details
+            ai_info = ""
+            if self.ai_enabled and hasattr(self, 'ai_sentiment_score'):
+                ai_info = f" | AI Sentiment: {self.ai_sentiment_score:.2f}"
+            
             self.logger.info(
                 f"💰 BUY ORDER EXECUTED: {position_size:.6f} {self.symbol} at ${current_price:.2f} | "
                 f"Stop Loss: ${stop_loss_price:.2f} | Take Profit: ${take_profit_price:.2f} | "
-                f"Risk: ${(current_price - stop_loss_price) * position_size:.2f}"
+                f"Risk: ${(current_price - stop_loss_price) * position_size:.2f}{ai_info}"
             )
+            
+            # Log AI-influenced trade to separate file for analysis
+            if self.ai_enabled:
+                try:
+                    with open('logs/ai_trades.log', 'a', encoding='utf-8') as f:
+                        f.write(f"{datetime.now().isoformat()},BUY,{current_price},{position_size},{self.ai_sentiment_score:.3f}\n")
+                except Exception:
+                    pass
             
         except Exception as e:
             self.logger.error(f"❌ Error placing buy order: {e}")
             
     async def place_sell_order(self, reason: str):
-        """Place a sell order with enhanced trade tracking and profit calculation"""
+        """Place a sell order with AI-enhanced trade tracking and profit calculation"""
         try:
             if not self.position:
                 return
@@ -789,14 +990,26 @@ class EnhancedTradingBot:
             # Check for badges
             self.gamification.check_trade_milestones(self.trade_count, self.total_profit)
             
-            # Enhanced logging with complete trade details
+            # Enhanced logging with AI and complete trade details
+            ai_info = ""
+            if self.ai_enabled and hasattr(self, 'ai_sentiment_score'):
+                ai_info = f" | AI Sentiment: {self.ai_sentiment_score:.2f}"
+            
             self.logger.info(
                 f"💸 SELL ORDER EXECUTED: {quantity:.6f} {self.symbol} at ${current_price:.2f} | "
                 f"Entry: ${self.entry_price:.2f} | Exit: ${current_price:.2f} | "
                 f"Profit: ${profit:.2f} ({profit_pct:+.2f}%) | Duration: {trade_duration:.1f}m | "
                 f"Result: {trade_result} | Reason: {reason} | "
-                f"Total P&L: ${self.total_profit:.2f} | Win Rate: {(self.winning_trades/self.trade_count)*100:.1f}%"
+                f"Total P&L: ${self.total_profit:.2f} | Win Rate: {(self.winning_trades/self.trade_count)*100:.1f}%{ai_info}"
             )
+            
+            # Log AI-influenced trade to separate file for analysis
+            if self.ai_enabled:
+                try:
+                    with open('logs/ai_trades.log', 'a', encoding='utf-8') as f:
+                        f.write(f"{datetime.now().isoformat()},SELL,{current_price},{quantity},{self.ai_sentiment_score:.3f},{profit:.2f},{profit_pct:.2f}\n")
+                except Exception:
+                    pass
             
             # Reset position
             self.position = None

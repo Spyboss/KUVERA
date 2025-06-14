@@ -1,328 +1,246 @@
-# 🚀 Kuvera Grid Trading Bot v1.1
+# Kuvera Grid Trading Bot v1.1 🚀
 
-<div align="center">
+**AI-Enhanced Cryptocurrency Trading Bot with Advanced Machine Learning**
 
-[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Testnet](https://img.shields.io/badge/Testnet-Supported-orange.svg)](https://testnet.binance.vision)
-[![AI Powered](https://img.shields.io/badge/AI-XGBoost-purple.svg)](https://xgboost.readthedocs.io)
-[![Real-time](https://img.shields.io/badge/UI-Real--time-brightgreen.svg)](https://github.com/Textualize/rich)
+A sophisticated trading bot that combines traditional technical analysis with cutting-edge AI and machine learning for optimized cryptocurrency trading strategies.
 
-**Advanced BTC/USDT Trading Bot with Real-time UI & XGBoost ML Integration**
+## 🌟 Key Features
 
-*Professional cryptocurrency trading automation with live updates, enhanced logging, and intelligent trade execution*
+### 🤖 AI-Powered Trading
+- **OpenRouter AI Integration**: Advanced sentiment analysis and strategy optimization
+- **Real-time AI Sentiment Scoring**: Dynamic position sizing based on market sentiment
+- **AI-Enhanced Stop-Loss/Take-Profit**: Adaptive risk management using AI insights
+- **Autonomous Trading Capabilities**: Optional fully automated trading with AI oversight
 
-[Features](#features) • [Installation](#installation) • [Configuration](#configuration) • [Strategy](#strategy-overview) • [Performance](#backtesting-results)
+### 🧠 Advanced Machine Learning
+- **XGBoost Integration**: Optimized for 8GB RAM with memory-efficient configurations
+- **scikit-learn 1.3.0**: Hyperparameter optimization using GridSearchCV
+- **Cross-Validation**: 3-fold CV for robust model selection
+- **Performance Metrics**: Comprehensive evaluation with RMSE, R², and directional accuracy
+- **Feature Engineering**: 11+ technical indicators for ML model training
 
-</div>
+### 📊 Enhanced Analytics
+- **Real-time Performance Tracking**: Live P&L, win rates, and trade statistics
+- **AI Trade Logging**: Separate logging for AI-influenced trades
+- **Model Performance Monitoring**: Track ML model accuracy and predictions
+- **Sentiment-Based UI**: Visual indicators for AI sentiment in the interface
 
----
+### 🎮 Modern Interface
+- **Rich Terminal UI**: Beautiful, real-time command-line interface
+- **Gamification System**: Achievements, streaks, and milestone tracking
+- **Live Market Data**: WebSocket integration for real-time price updates
+- **Interactive Controls**: Keyboard shortcuts for trading control
 
-## Overview
+### ⚡ Performance Optimizations
+- **Memory Efficient**: Optimized for 8GB RAM systems
+- **Async Operations**: Non-blocking AI analysis and trading operations
+- **Caching System**: Smart balance and data caching for reduced API calls
+- **Error Handling**: Robust fallback mechanisms for all components
 
-Kuvera Grid v1.1 is an advanced cryptocurrency trading bot designed for BTC/USDT pairs, featuring real-time UI updates, XGBoost machine learning integration, and enhanced trade execution with comprehensive risk management. Built for both testnet and live trading with professional-grade logging and monitoring.
+## 🚀 Quick Start
 
-## Features
+### Prerequisites
+- Python 3.8+
+- 8GB RAM (recommended)
+- Binance API account
+- OpenRouter API key (for AI features)
 
-### 🆕 Version 1.1 Enhancements
-- ⚡ **Real-time UI Updates**: Live metrics, balances, and trading status with 0.5s refresh rate
-- 🔧 **Enhanced Logging**: UTF-8 encoding support with detailed trade tracking and emoji indicators
-- 🤖 **XGBoost ML Integration**: Advanced machine learning models with memory optimization for 8GB RAM
-- 💰 **Smart Trade Execution**: Dynamic stop-loss/take-profit with comprehensive trade analytics
-- 📊 **Live Performance Tracking**: Real-time profit/loss, win rates, and position monitoring
+### Installation
 
-### Core Features
-- 📈 **Enhanced Mean-Reversion Strategy**: RSI, Bollinger Bands, and technical indicators
-- 🎮 **Gamification System**: Trading streaks, achievement badges, milestone tracking
-- 🖥️ **Professional CLI Interface**: Rich-powered dashboard with live data and interactive controls
-- 🛡️ **Advanced Risk Management**: Position sizing, dynamic stop-loss, daily limits, cooldown periods
-- 📡 **WebSocket Integration**: Real-time market data streaming with automatic reconnection
-- 🧪 **Comprehensive Backtesting**: Performance metrics, Sharpe ratio, drawdown analysis
-- 🔒 **Testnet Support**: Safe testing environment with full feature parity
-- 📈 **Trade Analytics**: Detailed logging with entry/exit times, profit tracking, and performance metrics
-
-## Installation
-
-### System Requirements
-- **Python**: 3.10 or higher
-- **Memory**: 8GB RAM recommended (optimized for v1.1)
-- **Network**: Stable internet connection for WebSocket streams
-- **Dependencies**: XGBoost, TA-Lib, NumPy, Pandas, Rich, WebSocket libraries
-
-### Quick Start
-
+1. **Clone the repository:**
 ```bash
-# Clone repository
-git clone https://github.com/Spyboss/KUVERA.git
-cd "Kuvera Grid"
+git clone <repository-url>
+cd kuvera-grid
+```
 
-# Install dependencies (includes XGBoost for ML)
+2. **Install dependencies:**
+```bash
 pip install -r requirements.txt
+```
 
-# For manual XGBoost installation if needed:
-pip install xgboost scikit-learn
+3. **Setup environment variables:**
+```bash
+cp .env.template .env
+# Edit .env with your API keys
+```
 
-# Configure API keys in config.yaml
-# Edit config.yaml with your Binance API credentials
+4. **Configure trading parameters:**
+```bash
+# Edit config/config.yaml for your preferences
+```
 
-# Launch bot with real-time UI
+5. **Run the bot:**
+```bash
 python bot.py
 ```
 
-### First Run
-1. **Interactive Setup**: Choose Testnet/Live mode, enable AI features
-2. **Real-time Dashboard**: Monitor live trades, balances, and performance
-3. **Keyboard Controls**: 
-   - `[s]` Start/Stop trading
-   - `[m]` Toggle mode display
-   - `[q]` Quit safely
+## 🔧 Configuration
 
-## Configuration
-
-### Environment Setup
-
-Create your `.env` file with the following structure:
-
+### Environment Variables (.env)
 ```env
-# Testnet Configuration (Recommended for testing)
+# Binance API (Required)
+BINANCE_API_KEY=your_binance_api_key
+BINANCE_SECRET_KEY=your_binance_secret_key
 BINANCE_TESTNET_API_KEY=your_testnet_api_key
 BINANCE_TESTNET_SECRET_KEY=your_testnet_secret_key
 
-# Production Configuration (Live trading - Exercise caution)
-BINANCE_LIVE_API_KEY=your_live_api_key
-BINANCE_LIVE_SECRET_KEY=your_live_secret_key
-
-# AI Integration
+# OpenRouter AI (Optional but recommended)
 OPENROUTER_API_KEY=your_openrouter_api_key
+
+# Trading Overrides (Optional)
+TRADING_SYMBOL=BTCUSDT
+AUTONOMOUS_TRADING=false
 ```
 
-### Trading Parameters
-
-Customize your strategy in `config/config.yaml`:
-
+### AI Configuration (config.yaml)
 ```yaml
+ai:
+  openrouter: true      # Enable/disable AI features
+  frequency: 15m        # AI analysis frequency
+
 trading:
   symbol: "BTCUSDT"
-  timeframe: "5m"
-  sma_period: 20
-  
-risk_management:
-  risk_per_trade: 0.01  # 1% of capital
-  max_risk_amount: 0.30  # Maximum $0.30 per trade
-  stop_loss_percent: 0.02  # 2% stop loss
-  daily_trade_limit: 50
-  daily_loss_limit: 5.00
+  risk_per_trade: 0.01  # 1% risk per trade
+  max_position_size: 0.30  # Max $0.30 per trade
 
 strategy:
-  entry_threshold: 0.01  # 1% below SMA
-  exit_threshold: 0.01   # 1% above SMA
-  cooldown_period: 300   # 5 minutes between trades
+  type: "mean_reversion"
+  entry_threshold: 0.02  # 2% below SMA for entry
+  exit_threshold: 0.015  # 1.5% above SMA for exit
+  stop_loss: 0.03       # 3% stop loss
 ```
 
-## Strategy Overview
+## 🎯 Trading Strategies
 
-### Mean-Reversion Algorithm
+### Mean Reversion Enhanced
+- **Technical Indicators**: SMA, RSI, Bollinger Bands, MACD
+- **ML Predictions**: XGBoost price direction forecasting
+- **AI Sentiment**: Market sentiment analysis for position sizing
+- **Risk Management**: Dynamic stop-loss based on AI confidence
 
-Our proprietary mean-reversion strategy operates on the principle that BTC/USDT prices tend to revert to their moving average over time.
+### Entry Conditions
+- Price below SMA threshold (configurable)
+- RSI oversold (< 30)
+- Price near Bollinger Band lower
+- Positive ML signal
+- Bullish AI sentiment (optional)
 
-#### Signal Generation
-1. **Entry Condition**: Price falls below SMA by threshold percentage
-2. **Exit Condition**: Price rises above SMA by threshold percentage
-3. **Stop Loss**: Triggered at 2% below entry price
-4. **Position Size**: Calculated based on risk per trade and stop-loss distance
+### Exit Conditions
+- Take profit above SMA threshold
+- RSI overbought (> 70)
+- Price near Bollinger Band upper
+- Negative ML signal
+- AI-driven exit signal
+- Stop-loss triggered
 
-#### Risk Framework
-- **Maximum Position Size**: Limited to 1% of total capital
-- **Dynamic Sizing**: Position size adjusts based on volatility
-- **Correlation Limits**: Prevents overexposure to correlated movements
-- **Time-based Exits**: Positions closed after maximum holding period
+## 🤖 AI Features
 
-## Backtesting Results
+### OpenRouter Integration
+- **Strategy Optimization**: AI-powered parameter tuning
+- **Sentiment Analysis**: Real-time market sentiment scoring
+- **Exit Strategy Analysis**: AI-enhanced sell decision making
+- **Risk Assessment**: Dynamic risk adjustment based on market conditions
 
-### 2024 Performance Metrics
+### Machine Learning Pipeline
+1. **Data Collection**: Historical price and volume data
+2. **Feature Engineering**: Technical indicators and price patterns
+3. **Model Training**: XGBoost with GridSearchCV optimization
+4. **Prediction**: Real-time price direction forecasting
+5. **Integration**: ML signals combined with traditional TA
 
-| Metric | Value |
-|--------|-------|
-| **Total Trades** | 1,247 |
-| **Win Rate** | 68.3% |
-| **Average Profit/Trade** | $1.23 |
-| **Maximum Drawdown** | 4.2% |
-| **Sharpe Ratio** | 1.87 |
-| **Annual Return** | 23.4% |
-| **Profit Factor** | 2.14 |
+## 📊 Performance Monitoring
 
-*Backtested on $1,000 initial capital with 5-minute BTC/USDT data*
+### Real-time Metrics
+- **Trade Statistics**: Win rate, profit/loss, trade count
+- **AI Sentiment**: Current market sentiment score (0-1)
+- **ML Performance**: Model accuracy and prediction confidence
+- **Risk Metrics**: Daily loss tracking and position sizing
 
-### Monthly Performance Breakdown
+### Logging
+- **Main Log**: `logs/trading_YYYYMMDD.log`
+- **AI Trades**: `logs/ai_trades.log`
+- **Backtest Results**: `logs/backtest_YYYYMMDD.log`
 
-```
-Jan 2024: +2.1%    Jul 2024: +1.8%
-Feb 2024: +1.9%    Aug 2024: +2.4%
-Mar 2024: +3.2%    Sep 2024: +1.6%
-Apr 2024: +2.7%    Oct 2024: +2.9%
-May 2024: +1.4%    Nov 2024: +2.1%
-Jun 2024: +2.3%    Dec 2024: +1.9%
-```
+## 🧪 Backtesting
 
-## Project Architecture
-
-```
-Kuvera Grid/
-├── 🤖 bot.py                      # Main trading engine
-├── ⚙️ config/
-│   └── config.yaml               # Strategy configuration
-├── 🧠 ai/
-│   ├── ai_strategy_optimizer.py  # AI optimization module
-│   ├── auto_trader.py           # Automated trading logic
-│   └── emergency_stop.py        # Emergency controls
-├── 📈 strategy/
-│   └── mean_reversion.py        # Core trading strategy
-├── 🔧 utils/
-│   └── data_manager.py          # Data processing utilities
-├── 🧪 tests/
-│   ├── backtest.py              # Historical testing
-│   └── quick_test.py            # System validation
-├── 📋 logs/                      # Trading logs and analytics
-├── 📦 requirements.txt          # Python dependencies
-└── 🔐 .env                      # API credentials
-```
-
-## Usage
-
-### Interactive Mode
-
-Launch the bot in interactive mode for guided setup:
+Run comprehensive backtests with AI and ML integration:
 
 ```bash
-python bot.py
+python backtest.py
 ```
 
-The system will guide you through:
-- Trading mode selection (Testnet/Live)
-- AI feature configuration
-- Risk parameter confirmation
-- Strategy validation
+### Backtest Features
+- **Historical Data**: Binance API integration
+- **ML Model Training**: Automated hyperparameter optimization
+- **Performance Metrics**: Sharpe ratio, max drawdown, win rate
+- **Visual Reports**: Equity curves and trade analysis
 
-### Monitoring
+## 🎮 Controls
 
-Use the included PowerShell monitoring script:
+### Keyboard Shortcuts
+- **`s`**: Start/Stop trading
+- **`m`**: Toggle display mode
+- **`q`**: Quit application
+- **`Ctrl+C`**: Emergency stop
 
-```powershell
-.\monitor.ps1
+### Safety Features
+- **Testnet Mode**: Safe testing environment
+- **Daily Limits**: Maximum trades and loss limits
+- **Emergency Stop**: Immediate position closure
+- **API Rate Limiting**: Prevents API abuse
+
+## 🔒 Security
+
+- **API Key Protection**: Environment variable storage
+- **Testnet First**: Always test before live trading
+- **Risk Limits**: Built-in position and loss limits
+- **Error Handling**: Graceful failure recovery
+
+## 📈 Performance Targets
+
+- **Weekly Target**: $1-2 profit per week
+- **Risk per Trade**: 1% of capital (max $0.30)
+- **Win Rate Target**: 60%+ with proper risk management
+- **Max Drawdown**: <5% of capital
+
+## 🛠️ Development
+
+### Project Structure
 ```
-
-Monitor key metrics:
-- Active positions
-- Daily P&L
-- Win rate statistics
-- Risk exposure levels
-
-## Safety & Security
-
-### Built-in Protections
-- **Testnet Default**: All operations default to safe testing environment
-- **API Validation**: Automatic credential verification and permissions check
-- **Rate Limiting**: Compliance with exchange API limits
-- **Secure Logging**: No sensitive information stored in logs
-- **Emergency Stops**: Manual and automatic position closure capabilities
-
-### Best Practices
-- Always test strategies in testnet environment first
-- Start with minimal position sizes in live trading
-- Monitor bot performance regularly
-- Keep API keys secure and rotate periodically
-- Maintain adequate risk management parameters
-
-## Development
-
-### Running Tests
-
-```bash
-# System validation
-python tests/quick_test.py
-
-# Strategy backtesting
-python tests/backtest.py
-
-# Performance profiling
-python -m cProfile bot.py
+kuvera-grid/
+├── bot.py                 # Main trading bot
+├── backtest.py           # Backtesting engine
+├── config/
+│   └── config.yaml       # Trading configuration
+├── ai/
+│   ├── ai_strategy_optimizer.py  # OpenRouter AI integration
+│   ├── auto_trader.py            # Autonomous trading
+│   └── emergency_stop.py         # Safety systems
+├── strategy/
+│   └── mean_reversion.py         # Trading strategies
+├── utils/
+│   └── data_manager.py           # Data utilities
+└── tests/
+    └── quick_test.py             # Test suite
 ```
 
 ### Contributing
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new features
+4. Submit a pull request
 
-We welcome contributions! Please follow these guidelines:
+## ⚠️ Disclaimer
 
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/enhancement`)
-3. **Commit** changes with clear messages
-4. **Test** thoroughly in testnet environment
-5. **Submit** a pull request with detailed description
+**This software is for educational purposes only. Cryptocurrency trading involves significant risk of loss. Never trade with money you cannot afford to lose. The developers are not responsible for any financial losses incurred through the use of this software.**
 
-### Code Standards
-- Follow PEP 8 style guidelines
-- Include comprehensive docstrings
-- Add unit tests for new features
-- Maintain backward compatibility
-- Document configuration changes
+## 📞 Support
 
-## Roadmap
-
-### Short Term (Q1 2025)
-- [ ] Multi-timeframe analysis integration
-- [ ] Enhanced AI model ensemble
-- [ ] Advanced portfolio optimization
-- [ ] Mobile app notifications
-
-### Medium Term (Q2-Q3 2025)
-- [ ] Multi-exchange support
-- [ ] Social trading features
-- [ ] Advanced backtesting engine
-- [ ] Web-based control panel
-
-### Long Term (Q4 2025+)
-- [ ] Institutional API integrations
-- [ ] Machine learning model training
-- [ ] Cross-asset trading capabilities
-- [ ] Regulatory compliance framework
-
-## Support
-
-### Getting Help
-- **Documentation**: [GitHub Wiki](https://github.com/Spyboss/KUVERA/wiki)
-- **Issues**: [Report Bugs](https://github.com/Spyboss/KUVERA/issues)
-- **Discussions**: [Community Forum](https://github.com/Spyboss/KUVERA/discussions)
-- **Updates**: [Release Notes](https://github.com/Spyboss/KUVERA/releases)
-
-### Community
-Join our growing community of algorithmic traders and developers working to democratize quantitative trading strategies.
-
-## Legal Disclaimer
-
-**⚠️ Important Notice**
-
-Cryptocurrency trading involves substantial risk of loss and is not suitable for all investors. Past performance does not indicate future results. This software is provided for educational and research purposes only. 
-
-**Key Risks:**
-- Market volatility can result in significant losses
-- Technical failures may impact trading performance
-- Regulatory changes may affect operations
-- No guarantee of profitability
-
-**By using this software, you acknowledge that you understand these risks and agree to trade at your own discretion and risk.**
-
-## License
-
-This project is licensed under the MIT License. See [LICENSE](LICENSE) file for complete terms.
+- **Author**: Uminda
+- **Email**: Uminda.h.aberathne@gmail.com
+- **Version**: 1.1
+- **License**: MIT
 
 ---
 
-<div align="center">
-
-**Created with ❤️ by Uminda H.**
-
-*Empowering the next generation of algorithmic traders*
-
-[![GitHub](https://img.shields.io/badge/GitHub-Follow-black?logo=github)](https://github.com/Spyboss)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-blue?logo=linkedin)](https://www.linkedin.com/in/uminda-h-aberathne/)
-
-</div>
+**Happy Trading! 🚀📈**

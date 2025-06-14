@@ -36,11 +36,16 @@ except ImportError:
 try:
     import xgboost as xgb
     from sklearn.preprocessing import StandardScaler
-    from sklearn.model_selection import train_test_split
+    from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+    from sklearn.metrics import mean_squared_error, r2_score
 except ImportError:
     xgb = None
     StandardScaler = None
     train_test_split = None
+    GridSearchCV = None
+    cross_val_score = None
+    mean_squared_error = None
+    r2_score = None
 
 class BacktestEngine:
     """Enhanced backtesting engine with comprehensive metrics"""
@@ -92,18 +97,117 @@ class BacktestEngine:
         self.logger = logging.getLogger('BacktestEngine')
         
     def setup_ml_components(self):
-        """Setup machine learning components"""
-        if xgb and StandardScaler:
+        """Setup enhanced machine learning components with hyperparameter optimization"""
+        if xgb and StandardScaler and GridSearchCV:
+            # Base XGBoost model with memory optimization for 8GB RAM
             self.ml_model = xgb.XGBRegressor(
-                n_estimators=100,
-                max_depth=6,
+                n_estimators=50,  # Reduced for memory efficiency
+                max_depth=4,      # Reduced depth to prevent overfitting
                 learning_rate=0.1,
-                random_state=42
+                subsample=0.8,    # Use 80% of data for each tree
+                colsample_bytree=0.8,  # Use 80% of features
+                random_state=42,
+                n_jobs=1,         # Single thread for memory efficiency
+                tree_method='hist'  # Memory efficient tree method
             )
+            
+            # Hyperparameter grid for optimization
+            self.param_grid = {
+                'n_estimators': [30, 50, 100],
+                'max_depth': [3, 4, 6],
+                'learning_rate': [0.05, 0.1, 0.2],
+                'subsample': [0.7, 0.8, 0.9]
+            }
+            
             self.scaler = StandardScaler()
-            self.logger.info("ML components initialized for backtesting")
+            self.best_model = None
+            self.model_performance = {}
+            
+            self.logger.info("Enhanced ML components with GridSearchCV initialized for backtesting")
         else:
             self.logger.warning("ML libraries not available, using basic strategy only")
+            
+    def optimize_model_parameters(self, X_train, y_train):
+        """Optimize XGBoost hyperparameters using GridSearchCV"""
+        if not (xgb and GridSearchCV and cross_val_score):
+            self.logger.warning("GridSearchCV not available, using default parameters")
+            return self.ml_model
+            
+        try:
+            self.logger.info("🔍 Starting hyperparameter optimization...")
+            
+            # Use smaller parameter grid for memory efficiency
+            reduced_param_grid = {
+                'n_estimators': [30, 50],
+                'max_depth': [3, 4],
+                'learning_rate': [0.1, 0.2]
+            }
+            
+            # GridSearchCV with cross-validation
+            grid_search = GridSearchCV(
+                estimator=self.ml_model,
+                param_grid=reduced_param_grid,
+                cv=3,  # 3-fold cross-validation for speed
+                scoring='neg_mean_squared_error',
+                n_jobs=1,  # Single job for memory efficiency
+                verbose=0
+            )
+            
+            # Fit the grid search
+            grid_search.fit(X_train, y_train)
+            
+            # Store best model and performance metrics
+            self.best_model = grid_search.best_estimator_
+            self.model_performance = {
+                'best_params': grid_search.best_params_,
+                'best_score': -grid_search.best_score_,
+                'cv_results': grid_search.cv_results_
+            }
+            
+            self.logger.info(f"✅ Best parameters: {grid_search.best_params_}")
+            self.logger.info(f"✅ Best CV score: {-grid_search.best_score_:.4f}")
+            
+            return self.best_model
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error in hyperparameter optimization: {e}")
+            return self.ml_model
+            
+    def evaluate_model_performance(self, X_test, y_test):
+        """Evaluate model performance with comprehensive metrics"""
+        if not (self.best_model and mean_squared_error and r2_score):
+            return {}
+            
+        try:
+            # Make predictions
+            y_pred = self.best_model.predict(X_test)
+            
+            # Calculate metrics
+            mse = mean_squared_error(y_test, y_pred)
+            rmse = np.sqrt(mse)
+            r2 = r2_score(y_test, y_pred)
+            
+            # Calculate directional accuracy
+            direction_actual = np.sign(y_test)
+            direction_pred = np.sign(y_pred)
+            directional_accuracy = np.mean(direction_actual == direction_pred)
+            
+            performance_metrics = {
+                'mse': mse,
+                'rmse': rmse,
+                'r2_score': r2,
+                'directional_accuracy': directional_accuracy,
+                'mean_prediction': np.mean(y_pred),
+                'std_prediction': np.std(y_pred)
+            }
+            
+            self.logger.info(f"📊 Model Performance - RMSE: {rmse:.4f}, R²: {r2:.4f}, Dir. Acc: {directional_accuracy:.2%}")
+            
+            return performance_metrics
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error evaluating model performance: {e}")
+            return {}
             
     def fetch_historical_data(self, symbol: str, interval: str, start_date: str, end_date: str) -> pd.DataFrame:
         """Fetch historical data from Binance public API"""
@@ -298,18 +402,43 @@ class BacktestEngine:
         X_train_scaled = self.scaler.fit_transform(X_train)
         X_test_scaled = self.scaler.transform(X_test)
         
-        # Train model
-        self.ml_model.fit(X_train_scaled, y_train)
+        # Optimize hyperparameters using GridSearchCV
+        optimized_model = self.optimize_model_parameters(X_train_scaled, y_train)
         
-        # Evaluate
+        # Use optimized model if available, otherwise use default
+        if optimized_model:
+            self.ml_model = optimized_model
+        else:
+            # Fallback to default training
+            self.ml_model.fit(X_train_scaled, y_train)
+        
+        # Comprehensive model evaluation
+        performance_metrics = self.evaluate_model_performance(X_test_scaled, y_test)
+        
+        # Basic evaluation for compatibility
         train_score = self.ml_model.score(X_train_scaled, y_train)
         test_score = self.ml_model.score(X_test_scaled, y_test)
         
-        self.console.print(f"[green]✅ ML model trained - Train R²: {train_score:.3f}, Test R²: {test_score:.3f}[/green]")
+        # Enhanced logging with performance metrics
+        if performance_metrics:
+            self.console.print(
+                f"[green]✅ Enhanced ML model trained - Train R²: {train_score:.3f}, Test R²: {test_score:.3f}[/green]\n"
+                f"[cyan]📊 RMSE: {performance_metrics.get('rmse', 0):.4f}, "
+                f"Directional Accuracy: {performance_metrics.get('directional_accuracy', 0):.2%}[/cyan]"
+            )
+        else:
+            self.console.print(f"[green]✅ ML model trained - Train R²: {train_score:.3f}, Test R²: {test_score:.3f}[/green]")
+        
+        # Log best parameters if optimization was successful
+        if hasattr(self, 'model_performance') and self.model_performance:
+            self.logger.info(f"🎯 Optimized parameters: {self.model_performance.get('best_params', {})}")
         
     def get_ml_signal(self, features: Dict[str, float]) -> float:
-        """Get ML prediction signal"""
-        if self.ml_model is None or self.scaler is None:
+        """Get ML prediction signal using optimized model"""
+        # Use best_model if available, otherwise fall back to ml_model
+        model_to_use = self.best_model if self.best_model is not None else self.ml_model
+        
+        if model_to_use is None or self.scaler is None:
             return 0.0
             
         try:
@@ -323,7 +452,7 @@ class BacktestEngine:
             feature_array = np.array(feature_values).reshape(1, -1)
             feature_scaled = self.scaler.transform(feature_array)
             
-            prediction = self.ml_model.predict(feature_scaled)[0]
+            prediction = model_to_use.predict(feature_scaled)[0]
             return prediction
             
         except Exception as e:
