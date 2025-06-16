@@ -1,0 +1,26 @@
+[variables]
+# Optimize Python build for numerical libraries
+PIP_NO_CACHE_DIR = "1"
+PIP_DISABLE_PIP_VERSION_CHECK = "1"
+PIP_ONLY_BINARY = ":all:"
+
+# Increase build timeout for heavy dependencies
+NIXPACKS_BUILD_TIMEOUT = "1800"
+
+# Memory optimization
+PYTHONUNBUFFERED = "1"
+PYTHONDONTWRITEBYTECODE = "1"
+
+[phases.build]
+# Use faster pip resolver
+cmds = [
+  "pip install --upgrade pip setuptools wheel",
+  "pip install --no-cache-dir --only-binary=all -r requirements.txt"
+]
+
+[phases.start]
+cmd = "python app.py"
+
+[build]
+# Ensure we use Python 3.11+ for better wheel compatibility
+pythonVersion = "3.11"
