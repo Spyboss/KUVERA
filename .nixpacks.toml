@@ -11,15 +11,28 @@ NIXPACKS_BUILD_TIMEOUT = "1800"
 PYTHONUNBUFFERED = "1"
 PYTHONDONTWRITEBYTECODE = "1"
 
-[phases.build]
-# Use faster pip resolver
+# Enable verbose logging
+PIP_VERBOSE = "1"
+
+[phases.setup]
+cmds = [
+  "apt-get update",
+  "apt-get install -y build-essential gcc g++ gfortran libopenblas-dev liblapack-dev pkg-config"
+]
+
+[phases.install]
 cmds = [
   "pip install --upgrade pip setuptools wheel",
-  "pip install --no-cache-dir --only-binary=all -r requirements.txt"
+  "pip install --no-cache-dir --only-binary=:all: -r requirements.txt"
+]
+
+[phases.build]
+cmds = [
+  "python -c 'import numpy; import pandas; import backtrader; print(\"Dependencies verified\")'"
 ]
 
 [phases.start]
-cmd = "python app.py"
+cmd = "gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app"
 
 [build]
 # Ensure we use Python 3.11+ for better wheel compatibility

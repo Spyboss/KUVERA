@@ -1,8 +1,4 @@
 # Core trading libraries
-# Pip configuration for faster, more reliable builds
---only-binary=:all:
---no-cache-dir
-
 # Core trading
 binance-connector==3.7.0
 backtrader==1.9.78.123
