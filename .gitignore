@@ -17,9 +17,11 @@ logs/
 # Data files
 data/
 *.csv
-*.json
 *.pickle
 *.pkl
+
+# Allow railway.json for deployment
+!railway.json
 
 # Backtest results
 backtests/
