@@ -14,6 +14,9 @@ PYTHONDONTWRITEBYTECODE = "1"
 # Enable verbose logging
 PIP_VERBOSE = "1"
 
+# Force Python 3.10
+NIXPACKS_PYTHON_VERSION = "3.10"
+
 [phases.setup]
 cmds = [
   "apt-get update",
@@ -34,6 +37,5 @@ cmds = [
 [phases.start]
 cmd = "gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app"
 
-[build]
-# Use Python 3.10 for better package compatibility
-pythonVersion = "3.10"
+[providers.python]
+version = "3.10"
