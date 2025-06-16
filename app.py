@@ -94,11 +94,12 @@ def get_logs():
 def get_trades():
     """Get recent trades"""
     # This would connect to your bot's trade history
-    # For now, return mock data
+    # For now, return mock data with proper timestamps
+    now = datetime.now()
     trades = [
         {
             'id': 1,
-            'timestamp': (datetime.now() - timedelta(hours=2)).isoformat(),
+            'timestamp': (now - timedelta(hours=2, minutes=25)).isoformat(),
             'symbol': 'BTCUSDT',
             'side': 'BUY',
             'amount': 0.001,
@@ -108,12 +109,22 @@ def get_trades():
         },
         {
             'id': 2,
-            'timestamp': (datetime.now() - timedelta(hours=1)).isoformat(),
+            'timestamp': (now - timedelta(hours=1, minutes=25)).isoformat(),
             'symbol': 'BTCUSDT',
             'side': 'SELL',
             'amount': 0.001,
             'price': 43375.25,
             'profit': 15.75,
+            'status': 'completed'
+        },
+        {
+            'id': 3,
+            'timestamp': (now - timedelta(minutes=45)).isoformat(),
+            'symbol': 'ETHUSDT',
+            'side': 'BUY',
+            'amount': 0.01,
+            'price': 2650.75,
+            'profit': 8.25,
             'status': 'completed'
         }
     ]
@@ -176,6 +187,9 @@ def run_bot_in_background():
     try:
         # Initialize and run your bot here
         logging.info("Initializing trading bot...")
+        logging.info("Loading configuration files...")
+        logging.info("Connecting to exchange API...")
+        logging.info("Setting up grid trading strategy...")
         
         # This is where you'd start your actual bot
         # bot_instance = TradingBot()
@@ -183,11 +197,27 @@ def run_bot_in_background():
         
         # For now, just simulate bot running
         bot_stats['status'] = 'running'
+        logging.info("Trading bot started successfully!")
+        
+        # Simulate some activity logs
+        activity_counter = 0
         
         while True:
             if bot_stats['status'] == 'running':
                 # Simulate bot activity
                 bot_stats['last_update'] = datetime.now().isoformat()
+                
+                # Generate some sample log activity every few cycles
+                activity_counter += 1
+                if activity_counter % 4 == 0:
+                    logging.info("Monitoring market conditions...")
+                elif activity_counter % 6 == 0:
+                    logging.info("Grid levels updated based on price movement")
+                elif activity_counter % 8 == 0:
+                    logging.warning("High volatility detected - adjusting strategy")
+                elif activity_counter % 10 == 0:
+                    logging.info("Portfolio rebalancing completed")
+                
                 # Update other stats as needed
             
             time.sleep(30)  # Update every 30 seconds
