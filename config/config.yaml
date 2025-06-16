@@ -8,46 +8,154 @@ api:
 # Trading Configuration
 trading:
   symbol: "BTCUSDT"
-  capital: 30.0  # Total capital in USDT
-  risk_per_trade: 0.01  # 1% risk per trade
-  max_position_size: 0.30  # Maximum $0.30 per trade
+  capital: 100.0  # Total capital in USDT
+  risk_per_trade: 0.015  # 1.5% risk per trade (enhanced)
+  max_position_size: 0.45  # Maximum $0.45 per trade (enhanced)
   startup_test_enabled: true  # Enable startup test trades (testnet only)
   
-# Strategy Parameters
+  # Enhanced Trading Configuration
+  enhanced_features:
+    multi_timeframe: true          # Enable multi-timeframe analysis
+    dynamic_thresholds: true       # Enable ATR-based dynamic thresholds
+    ai_ensemble: true              # Enable AI ensemble filtering
+    kelly_sizing: true             # Enable Kelly Criterion position sizing
+    trailing_stops: true           # Enable trailing stop losses
+  
+# Optimized Strategy Parameters v1.2 (Grok AI Enhanced)
 strategy:
-  type: mean_reversion  # Options: mean_reversion, grid, dca
-  sma_period: 20
-  entry_threshold: 0.005  # 0.5% below SMA to buy
-  exit_threshold: 0.005   # 0.5% above SMA to sell
-  stop_loss: 0.008        # 0.8% stop loss
+  type: mean_reversion_optimized  # Optimized mean reversion with Grok AI enhancements
+  
+  # Optimized SMA Configuration (Grok AI: 12-period base)
+  sma_period_base: 12  # Grok AI optimized: 12-period SMA
+  sma_period_max: 14   # Maximum period for dynamic adjustment
+  atr_period: 10       # ATR period for volatility adjustment
+  
+  # Optimized Entry/Exit Thresholds (Grok AI: 0.3 × ATR entry, 2.0 × ATR exit)
+  entry_threshold_atr_multiplier: 0.3   # Grok AI: 0.3 × 10-period ATR
+  exit_threshold_atr_multiplier: 2.0    # Grok AI: 2.0 × ATR
+  entry_threshold_min: 0.002            # 0.2% minimum fallback
+  entry_threshold_max: 0.004            # 0.4% maximum fallback
+  exit_threshold_min: 0.015             # 1.5% minimum fallback
+  exit_threshold_max: 0.020             # 2.0% maximum fallback
+  
+  # Optimized Bollinger Bands (Grok AI: 1.5 multiplier)
+  bb_period: 20
+  bb_multiplier: 1.5   # Grok AI optimized multiplier
+  
+  # Multi-timeframe Analysis (Grok AI Enhanced)
+  timeframes:
+    trend_1h:
+      ema_period: 50     # Grok AI: 1-hour 50-period EMA for trend filter
+      enabled: true
+    setup_15m:
+      macd_fast: 12      # Grok AI: 15-minute MACD (12,26) filter
+      macd_slow: 26
+      macd_signal: 9
+      rsi_period: 14     # Grok AI: 15-minute RSI (14) filter
+      enabled: true
+  
+  # Optimized Risk Management (Grok AI Enhanced)
+  risk_management:
+    # Kelly Criterion Position Sizing (Grok AI: 1-2% risk)
+    kelly_enabled: true
+    risk_per_trade_min: 0.01    # Grok AI: 1% minimum risk
+    risk_per_trade_max: 0.02    # Grok AI: 2% maximum risk
+    kelly_formula: true         # Account Balance × Risk% / (ATR × Stop Distance)
+    
+    # Dynamic ATR-based Stop Loss (Grok AI: 1.5-2.0 × ATR)
+    stop_loss_atr_min: 1.5      # Grok AI: 1.5 × ATR minimum
+    stop_loss_atr_max: 2.0      # Grok AI: 2.0 × ATR maximum
+    
+    # Trailing Stop (Grok AI: 1.0 × ATR)
+    trailing_stop_atr: 1.0      # Grok AI: 1.0 × ATR trailing stop
+    trailing_enabled: true
+    
+    # Time-based Exit (Grok AI: 5-hour max)
+    max_position_hours: 5       # Grok AI: Exit after 5 hours
+    
+    # Portfolio Risk (Grok AI: 15% max exposure)
+    max_portfolio_exposure: 0.15  # Grok AI: 15% maximum exposure
+  
+  # Legacy parameters for compatibility
+  entry_threshold: 0.003  # Will be overridden by dynamic calculation
+  exit_threshold: 0.0175  # Will be overridden by dynamic calculation
+  stop_loss: 0.0175       # Will be overridden by ATR calculation
   
   # Enhanced indicators
   params:
     rsi_period: 14
     bb_period: 20
-    bb_std: 2
+    bb_std: 1.5  # Updated multiplier
     
-    # Grid strategy parameters
+    # Grid strategy parameters (future)
     grid_levels: 10
-    grid_range: 0.05  # 5% range
-    grid_risk_per_order: 0.001  # 0.1% risk per grid order
+    grid_range: 0.05
+    grid_risk_per_order: 0.001
     
-    # DCA strategy parameters
+    # DCA strategy parameters (future)
     dca_interval: weekly
-    dca_amount: 10.0  # $10 per DCA
-    dca_trigger: -0.02  # -2% price drop trigger
+    dca_amount: 10.0
+    dca_trigger: -0.02
   
-# Risk Management
+# Enhanced Risk Management v1.1
 risk:
-  max_daily_trades: 5
-  max_daily_loss: 1.0  # Maximum daily loss in USDT
-  cooldown_period: 300  # 5 minutes between trades
+  # Trade Limits
+  max_daily_trades: 8              # Increased for enhanced strategy
+  max_daily_loss: 2.0              # Maximum daily loss in USDT
+  cooldown_period: 180             # 3 minutes between trades (reduced)
   
-# AI Configuration
+  # Position Sizing (Kelly Criterion)
+  kelly_criterion:
+    enabled: true
+    win_rate_estimate: 0.55        # Estimated win rate for Kelly calculation
+    avg_win_loss_ratio: 1.2        # Average win/loss ratio
+    max_kelly_fraction: 0.25       # Maximum Kelly fraction (25%)
+  
+  # Dynamic Risk Adjustment
+  dynamic_risk:
+    enabled: true
+    volatility_adjustment: true     # Adjust risk based on market volatility
+    drawdown_reduction: true        # Reduce risk during drawdowns
+    max_consecutive_losses: 3       # Reduce position size after 3 losses
+  
+  # Portfolio Risk Controls
+  portfolio:
+    max_exposure_pct: 15           # 15% maximum portfolio exposure
+    correlation_limit: 0.7         # Maximum correlation between positions
+    sector_concentration_limit: 0.3 # Maximum sector concentration
+  
+# Optimized AI Configuration v1.2 (Grok AI Enhanced)
 ai:
   openrouter: true  # Enable/disable OpenRouter AI features
-  frequency: 15m    # AI analysis frequency
+  frequency: 10m    # Grok AI: 10-minute sentiment analysis frequency
   diagnostic_mode: true  # Enable OpenRouter API connectivity testing
+  
+  # Optimized Ensemble AI Filtering (Grok AI Enhanced)
+  ensemble:
+    enabled: true
+    lstm_confidence_min: 0.70    # Grok AI: 0.7 (70%) LSTM confidence threshold
+    lstm_confidence_max: 0.85    # Enhanced maximum threshold
+    xgboost_validation: true     # XGBoost validation enabled
+    confidence_threshold: 0.70   # Grok AI: Enhanced confidence threshold
+  
+  # Optimized Model Retraining (Grok AI: 12-hour XGBoost retrain)
+  xgboost_retrain_hours: 12      # Grok AI: Retrain XGBoost every 12 hours
+  lstm_retrain_hours: 24         # LSTM retraining frequency
+  
+  # Enhanced RSI Divergence Detection
+  rsi_divergence:
+    enabled: true
+    lookback_periods: 20
+    min_divergence_strength: 0.3
+  
+  # Optimized Sentiment Analysis (Grok AI: 10-minute updates)
+  sentiment:
+    frequency_minutes: 10        # Grok AI: 10-minute sentiment updates
+    weight_in_decision: 0.3      # 30% weight in trading decisions
+    confidence_boost: 0.1        # Boost confidence when sentiment aligns
+    models:
+      primary: 'mistralai/mistral-7b-instruct:free'
+      backup: 'meta-llama/llama-3.2-3b-instruct:free'
 
 # Monitoring and alerts
 monitoring:

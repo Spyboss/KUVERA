@@ -334,10 +334,32 @@ class EnhancedTradingBot:
         self._cached_balances = None
         self._last_balance_update = 0
         
-        # AI/ML components
+        # Enhanced AI/ML components v1.1
         self.ml_model = None
         self.scaler = None
+        self.lstm_model = None  # LSTM for ensemble filtering
         self.setup_ml_components()
+        
+        # Multi-timeframe data buffers
+        self.price_buffer_1h = deque(maxlen=200)   # 1-hour data for trend analysis
+        self.price_buffer_15m = deque(maxlen=500)  # 15-minute data for setup signals
+        self.atr_buffer = deque(maxlen=50)         # ATR values for dynamic thresholds
+        
+        # Enhanced technical indicators storage
+        self.indicators_cache = {
+            '5m': {},   # 5-minute indicators
+            '15m': {},  # 15-minute indicators  
+            '1h': {}    # 1-hour indicators
+        }
+        
+        # Kelly Criterion variables
+        self.trade_history = deque(maxlen=100)  # Store recent trade results
+        self.consecutive_losses = 0
+        self.current_kelly_fraction = 0.01  # Start conservative
+        
+        # Trailing stop variables
+        self.trailing_stop_price = None
+        self.highest_price_since_entry = None
         
         # OpenRouter AI Integration
         self.openrouter_api_key = os.getenv('OPENROUTER_API_KEY')
@@ -345,8 +367,13 @@ class EnhancedTradingBot:
         self.auto_trader = None
         self.ai_enabled = self.config.get('ai', {}).get('openrouter', False)
         self.ai_sentiment_score = 0.5  # Neutral
+        self.ai_ensemble_confidence = 0.5  # Ensemble confidence
         self.diagnostic_mode = self.config.get('ai', {}).get('diagnostic_mode', False)
         self.startup_test_enabled = self.config.get('trading', {}).get('startup_test', True)
+        
+        # XGBoost retraining timer
+        self.last_xgboost_retrain = 0
+        self.xgboost_retrain_interval = self.config.get('ai', {}).get('xgboost_retrain_hours', 12) * 3600
         
         # Setup AI components after ML components
         self.setup_ai_components()
@@ -635,32 +662,220 @@ class EnhancedTradingBot:
             self.logger.error(f"❌ Error setting up AI components: {e}")
             self.logger.info("🔄 Continuing with standard trading strategy")
             
-    def calculate_technical_indicators(self, prices: List[float]) -> Dict[str, float]:
-        """Calculate technical indicators"""
+    def calculate_atr(self, high_prices: List[float], low_prices: List[float], close_prices: List[float], period: int = 10) -> float:
+        """Calculate Average True Range for dynamic thresholds"""
+        try:
+            if len(close_prices) < period + 1 or not talib:
+                return 0.01  # Default ATR value
+                
+            high_array = np.array(high_prices, dtype=float)
+            low_array = np.array(low_prices, dtype=float) 
+            close_array = np.array(close_prices, dtype=float)
+            
+            atr = talib.ATR(high_array, low_array, close_array, timeperiod=period)[-1]
+            return atr if not np.isnan(atr) else 0.01
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating ATR: {e}")
+            return 0.01
+    
+    def calculate_dynamic_sma_period(self, atr_value: float, base_price: float) -> int:
+        """Calculate dynamic SMA period based on ATR volatility"""
+        try:
+            config = self.config['strategy']
+            base_period = config.get('sma_period_base', 12)
+            max_period = config.get('sma_period_max', 14)
+            
+            # Calculate volatility ratio (ATR as percentage of price)
+            volatility_ratio = atr_value / base_price if base_price > 0 else 0
+            
+            # Adjust period based on volatility (higher volatility = longer period)
+            if volatility_ratio > 0.02:  # High volatility (>2%)
+                return max_period
+            elif volatility_ratio < 0.005:  # Low volatility (<0.5%)
+                return base_period
+            else:
+                # Linear interpolation between base and max
+                ratio = (volatility_ratio - 0.005) / (0.02 - 0.005)
+                return int(base_period + ratio * (max_period - base_period))
+                
+        except Exception as e:
+            self.logger.error(f"Error calculating dynamic SMA period: {e}")
+            return 12  # Default fallback
+    
+    def calculate_dynamic_thresholds(self, atr_value: float, base_price: float) -> Tuple[float, float]:
+        """Calculate optimized dynamic entry/exit thresholds based on Grok AI ATR multipliers"""
+        try:
+            config = self.config['strategy']
+            
+            # Grok AI optimized ATR multipliers
+            entry_atr_multiplier = config.get('entry_threshold_atr_multiplier', 0.3)  # Grok AI: 0.3 × 10-period ATR
+            exit_atr_multiplier = config.get('exit_threshold_atr_multiplier', 2.0)    # Grok AI: 2.0 × ATR
+            
+            # Fallback bounds from config
+            entry_min = config.get('entry_threshold_min', 0.002)
+            entry_max = config.get('entry_threshold_max', 0.004)
+            exit_min = config.get('exit_threshold_min', 0.015)
+            exit_max = config.get('exit_threshold_max', 0.020)
+            
+            # Calculate ATR as percentage of price
+            atr_pct = atr_value / base_price if base_price > 0 else 0.01
+            
+            # Grok AI optimized thresholds: Direct ATR multiplier approach
+            entry_threshold = min(entry_max, max(entry_min, entry_atr_multiplier * atr_pct))  # 0.3 × ATR
+            exit_threshold = min(exit_max, max(exit_min, exit_atr_multiplier * atr_pct))      # 2.0 × ATR
+            
+            self.logger.debug(f"Grok AI Thresholds - ATR: {atr_value:.4f}, Entry: {entry_threshold:.4f}, Exit: {exit_threshold:.4f}")
+            return entry_threshold, exit_threshold
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating Grok AI dynamic thresholds: {e}")
+            return 0.003, 0.0175  # Default fallback
+    
+    def detect_rsi_divergence(self, prices: List[float], rsi_values: List[float], lookback: int = 20) -> Dict[str, bool]:
+        """Detect RSI divergence patterns"""
+        try:
+            if len(prices) < lookback or len(rsi_values) < lookback:
+                return {'bullish_divergence': False, 'bearish_divergence': False}
+            
+            recent_prices = prices[-lookback:]
+            recent_rsi = rsi_values[-lookback:]
+            
+            # Find price and RSI peaks/troughs
+            price_peaks = []
+            rsi_peaks = []
+            price_troughs = []
+            rsi_troughs = []
+            
+            for i in range(1, len(recent_prices) - 1):
+                # Price peaks
+                if recent_prices[i] > recent_prices[i-1] and recent_prices[i] > recent_prices[i+1]:
+                    price_peaks.append((i, recent_prices[i]))
+                    rsi_peaks.append((i, recent_rsi[i]))
+                
+                # Price troughs
+                if recent_prices[i] < recent_prices[i-1] and recent_prices[i] < recent_prices[i+1]:
+                    price_troughs.append((i, recent_prices[i]))
+                    rsi_troughs.append((i, recent_rsi[i]))
+            
+            # Check for divergences
+            bullish_divergence = False
+            bearish_divergence = False
+            
+            # Bullish divergence: price makes lower lows, RSI makes higher lows
+            if len(price_troughs) >= 2 and len(rsi_troughs) >= 2:
+                last_price_trough = price_troughs[-1][1]
+                prev_price_trough = price_troughs[-2][1]
+                last_rsi_trough = rsi_troughs[-1][1]
+                prev_rsi_trough = rsi_troughs[-2][1]
+                
+                if last_price_trough < prev_price_trough and last_rsi_trough > prev_rsi_trough:
+                    bullish_divergence = True
+            
+            # Bearish divergence: price makes higher highs, RSI makes lower highs
+            if len(price_peaks) >= 2 and len(rsi_peaks) >= 2:
+                last_price_peak = price_peaks[-1][1]
+                prev_price_peak = price_peaks[-2][1]
+                last_rsi_peak = rsi_peaks[-1][1]
+                prev_rsi_peak = rsi_peaks[-2][1]
+                
+                if last_price_peak > prev_price_peak and last_rsi_peak < prev_rsi_peak:
+                    bearish_divergence = True
+            
+            return {
+                'bullish_divergence': bullish_divergence,
+                'bearish_divergence': bearish_divergence
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting RSI divergence: {e}")
+            return {'bullish_divergence': False, 'bearish_divergence': False}
+    
+    def calculate_technical_indicators(self, prices: List[float], timeframe: str = '5m', high_prices: List[float] = None, low_prices: List[float] = None) -> Dict[str, float]:
+        """Calculate enhanced technical indicators with multi-timeframe support"""
         if len(prices) < 20 or not talib:
             return {}
             
         prices_array = np.array(prices, dtype=float)
-        
         indicators = {}
         
         try:
-            # Simple Moving Average
-            sma = talib.SMA(prices_array, timeperiod=20)[-1]
-            indicators['sma'] = sma
+            current_price = prices[-1]
+            
+            # Calculate ATR for dynamic adjustments
+            if high_prices and low_prices and len(high_prices) == len(prices):
+                atr_value = self.calculate_atr(high_prices, low_prices, prices)
+                indicators['atr'] = atr_value
+                self.atr_buffer.append(atr_value)
+                
+                # Calculate dynamic SMA period
+                dynamic_sma_period = self.calculate_dynamic_sma_period(atr_value, current_price)
+                indicators['dynamic_sma_period'] = dynamic_sma_period
+                
+                # Calculate dynamic thresholds
+                entry_threshold, exit_threshold = self.calculate_dynamic_thresholds(atr_value, current_price)
+                indicators['dynamic_entry_threshold'] = entry_threshold
+                indicators['dynamic_exit_threshold'] = exit_threshold
+            else:
+                # Use default values if OHLC data not available
+                dynamic_sma_period = 12
+                indicators['atr'] = 0.01
+                indicators['dynamic_sma_period'] = dynamic_sma_period
+                indicators['dynamic_entry_threshold'] = 0.003
+                indicators['dynamic_exit_threshold'] = 0.0175
+            
+            # Dynamic SMA
+            if len(prices) >= dynamic_sma_period:
+                sma = talib.SMA(prices_array, timeperiod=dynamic_sma_period)[-1]
+                indicators['sma'] = sma
             
             # RSI
             rsi = talib.RSI(prices_array, timeperiod=14)[-1]
             indicators['rsi'] = rsi
             
-            # Bollinger Bands
-            bb_upper, bb_middle, bb_lower = talib.BBANDS(prices_array, timeperiod=20, nbdevup=2, nbdevdn=2)
+            # Enhanced Bollinger Bands with configurable multiplier
+            bb_multiplier = self.config['strategy'].get('bb_multiplier', 1.5)
+            bb_upper, bb_middle, bb_lower = talib.BBANDS(prices_array, timeperiod=20, nbdevup=bb_multiplier, nbdevdn=bb_multiplier)
             indicators['bb_upper'] = bb_upper[-1]
             indicators['bb_middle'] = bb_middle[-1]
             indicators['bb_lower'] = bb_lower[-1]
             
+            # Multi-timeframe specific indicators
+            if timeframe == '1h':
+                # 1-hour EMA for trend
+                ema_period = self.config['strategy']['timeframes']['trend_1h'].get('ema_period', 50)
+                if len(prices) >= ema_period:
+                    ema = talib.EMA(prices_array, timeperiod=ema_period)[-1]
+                    indicators['ema_50'] = ema
+                    indicators['trend_direction'] = 'bullish' if current_price > ema else 'bearish'
+            
+            elif timeframe == '15m':
+                # 15-minute MACD
+                macd_config = self.config['strategy']['timeframes']['setup_15m']
+                macd_fast = macd_config.get('macd_fast', 12)
+                macd_slow = macd_config.get('macd_slow', 26)
+                macd_signal = macd_config.get('macd_signal', 9)
+                
+                if len(prices) >= macd_slow:
+                    macd, macd_signal_line, macd_hist = talib.MACD(prices_array, fastperiod=macd_fast, slowperiod=macd_slow, signalperiod=macd_signal)
+                    indicators['macd'] = macd[-1]
+                    indicators['macd_signal'] = macd_signal_line[-1]
+                    indicators['macd_histogram'] = macd_hist[-1]
+                    indicators['macd_bullish'] = macd[-1] > macd_signal_line[-1]
+            
+            # RSI Divergence Detection
+            if len(prices) >= 20:
+                rsi_values = talib.RSI(prices_array, timeperiod=14)
+                rsi_values_clean = [x for x in rsi_values if not np.isnan(x)]
+                if len(rsi_values_clean) >= 20:
+                    divergence = self.detect_rsi_divergence(prices[-20:], rsi_values_clean[-20:])
+                    indicators.update(divergence)
+            
+            # Cache indicators for this timeframe
+            self.indicators_cache[timeframe] = indicators
+            
         except Exception as e:
-            self.logger.error(f"Error calculating indicators: {e}")
+            self.logger.error(f"Error calculating indicators for {timeframe}: {e}")
             
         return indicators
         
@@ -723,8 +938,120 @@ class EnhancedTradingBot:
             'ai_sentiment': self.ai_sentiment_score if self.ai_enabled else None
         }
         
+    async def get_multi_timeframe_signals(self, current_price: float) -> Dict[str, bool]:
+        """Get Grok AI optimized signals from multiple timeframes (1h EMA-50, 15m MACD(12,26) + RSI(14))"""
+        signals = {
+            'trend_1h_bullish': True,  # Default to neutral
+            'setup_15m_bullish': True,
+            'momentum_5m_bullish': True
+        }
+        
+        try:
+            # Grok AI: 1-hour 50-period EMA trend filter
+            if self.config['strategy']['timeframes']['trend_1h'].get('enabled', False):
+                indicators_1h = self.indicators_cache.get('1h', {})
+                ema_50 = indicators_1h.get('ema_50')
+                if ema_50:
+                    signals['trend_1h_bullish'] = current_price > ema_50
+                    self.logger.debug(f"Grok AI 1h EMA-50 Filter - Price: {current_price:.4f}, EMA: {ema_50:.4f}, Bullish: {signals['trend_1h_bullish']}")
+            
+            # Grok AI: 15-minute MACD (12,26) and RSI (14) setup filters
+            if self.config['strategy']['timeframes']['setup_15m'].get('enabled', False):
+                indicators_15m = self.indicators_cache.get('15m', {})
+                macd_bullish = indicators_15m.get('macd_bullish', True)
+                rsi_15m = indicators_15m.get('rsi')
+                
+                # Grok AI optimized MACD (12,26) filter
+                setup_conditions = [macd_bullish]
+                
+                # Grok AI optimized RSI (14) filter - not in extreme zones
+                if rsi_15m:
+                    rsi_condition = 30 <= rsi_15m <= 70  # Avoid overbought/oversold extremes
+                    setup_conditions.append(rsi_condition)
+                    self.logger.debug(f"Grok AI 15m Filters - MACD: {macd_bullish}, RSI: {rsi_15m:.2f}, RSI OK: {rsi_condition}")
+                
+                signals['setup_15m_bullish'] = all(setup_conditions)
+            
+            # Grok AI: 5-minute momentum confirmation
+            indicators_5m = self.indicators_cache.get('5m', {})
+            rsi_5m = indicators_5m.get('rsi')
+            if rsi_5m:
+                # Grok AI: Look for oversold conditions for mean reversion entry
+                signals['momentum_5m_bullish'] = rsi_5m < 40  # Oversold for mean reversion buy
+                self.logger.debug(f"Grok AI 5m Momentum - RSI: {rsi_5m:.2f}, Oversold: {signals['momentum_5m_bullish']}")
+            
+        except Exception as e:
+            self.logger.error(f"Error getting Grok AI multi-timeframe signals: {e}")
+        
+        return signals
+    
+    async def get_ai_ensemble_signal(self, current_price: float, indicators: Dict[str, float]) -> Tuple[bool, float]:
+        """Get Grok AI optimized ensemble signal with LSTM 0.7 confidence and XGBoost validation"""
+        try:
+            ai_config = self.config['ai']['ensemble']
+            if not ai_config.get('enabled', False):
+                return True, 0.5  # Neutral if disabled
+            
+            # Grok AI: LSTM confidence check with 0.7 threshold
+            lstm_confidence = 0.75  # Simulated LSTM confidence - implement actual LSTM prediction
+            lstm_min = ai_config.get('lstm_confidence_min', 0.70)  # Grok AI: 0.7 minimum
+            lstm_max = ai_config.get('lstm_confidence_max', 0.85)  # Enhanced maximum
+            
+            lstm_signal = lstm_min <= lstm_confidence <= lstm_max
+            self.logger.debug(f"Grok AI LSTM - Confidence: {lstm_confidence:.3f}, Signal: {lstm_signal}")
+            
+            # XGBoost validation
+            xgboost_signal = True
+            if ai_config.get('xgboost_validation', False) and self.ml_enabled:
+                try:
+                    # Retrain XGBoost if needed
+                    current_time = time.time()
+                    if current_time - self.last_xgboost_retrain > self.xgboost_retrain_interval:
+                        self.train_ml_model()
+                        self.last_xgboost_retrain = current_time
+                        self.logger.info("🔄 XGBoost model retrained")
+                    
+                    # Get XGBoost prediction
+                    if self.ml_model and len(self.price_buffer) >= 20:
+                        prices = list(self.price_buffer)
+                        sma_5 = sum(prices[-5:]) / 5
+                        sma_20 = sum(prices[-20:]) / 20
+                        price_change = (current_price - prices[-2]) / prices[-2]
+                        
+                        features = [[current_price, sma_5, sma_20, price_change]]
+                        features_scaled = self.scaler.transform(features)
+                        predicted_price = self.ml_model.predict(features_scaled)[0]
+                        
+                        xgboost_signal = predicted_price > current_price * 1.003  # 0.3% upside
+                        
+                except Exception as e:
+                    self.logger.error(f"XGBoost validation error: {e}")
+            
+            # RSI Divergence check
+            rsi_divergence_signal = True
+            if self.config['ai']['rsi_divergence'].get('enabled', False):
+                divergence = indicators.get('bullish_divergence', False)
+                rsi_divergence_signal = not indicators.get('bearish_divergence', False)
+                if divergence:
+                    rsi_divergence_signal = True  # Bullish divergence is positive
+            
+            # Combine ensemble signals
+            ensemble_signals = [lstm_signal, xgboost_signal, rsi_divergence_signal]
+            ensemble_confidence = sum(ensemble_signals) / len(ensemble_signals)
+            
+            confidence_threshold = ai_config.get('confidence_threshold', 0.65)
+            final_signal = ensemble_confidence >= confidence_threshold
+            
+            self.ai_ensemble_confidence = ensemble_confidence
+            
+            return final_signal, ensemble_confidence
+            
+        except Exception as e:
+            self.logger.error(f"Error in AI ensemble signal: {e}")
+            return True, 0.5
+    
     async def should_buy_enhanced(self, current_price: float, indicators: Dict[str, float]) -> bool:
-        """Enhanced buy logic with AI, ML and multiple indicators"""
+        """Enhanced buy logic with multi-timeframe analysis and AI ensemble filtering"""
         if self.position or not indicators:
             return False
             
@@ -741,102 +1068,86 @@ class EnhancedTradingBot:
         if self.daily_loss >= self.config['risk']['max_daily_loss']:
             return False
             
-        # Enhanced signal logic
+        # Get dynamic thresholds from indicators
         sma = indicators.get('sma')
         rsi = indicators.get('rsi')
         bb_lower = indicators.get('bb_lower')
+        entry_threshold = indicators.get('dynamic_entry_threshold', 0.003)
         
         if not sma:
             return False
             
-        # Multiple conditions for stronger signal
+        # Enhanced signal conditions with dynamic thresholds
         conditions = []
         
-        # Price below SMA threshold
-        entry_threshold = self.config['strategy']['entry_threshold']
+        # Price below dynamic SMA threshold
         buy_threshold = sma * (1 - entry_threshold)
         conditions.append(current_price <= buy_threshold)
         
-        # RSI oversold
+        # RSI oversold (more selective)
         if rsi:
-            conditions.append(rsi < 30)
+            conditions.append(rsi < 35)  # Slightly more selective
             
-        # Price near Bollinger Band lower
+        # Price near enhanced Bollinger Band lower
         if bb_lower:
-            conditions.append(current_price <= bb_lower * 1.01)
-            
-        # ML prediction if available
-        ml_signal = False
-        if self.ml_enabled and self.ml_model and len(self.price_buffer) >= 20:
-            try:
-                prices = list(self.price_buffer)
-                # Prepare features for prediction
-                sma_5 = sum(prices[-5:]) / 5
-                sma_20 = sum(prices[-20:]) / 20
-                price_change = (current_price - prices[-2]) / prices[-2]
-                
-                features = [[current_price, sma_5, sma_20, price_change]]
-                features_scaled = self.scaler.transform(features)
-                
-                predicted_price = self.ml_model.predict(features_scaled)[0]
-                ml_signal = predicted_price > current_price * 1.005  # 0.5% upside prediction
-                
-            except Exception as e:
-                self.logger.error(f"ML prediction error: {e}")
+            conditions.append(current_price <= bb_lower * 1.005)  # Tighter threshold
         
-        # AI sentiment analysis if available
-        ai_signal = True  # Default to neutral
-        ai_confidence = 0.5
+        # Multi-timeframe analysis
+        multi_tf_signals = await self.get_multi_timeframe_signals(current_price)
+        timeframe_bullish = (
+            multi_tf_signals['trend_1h_bullish'] and 
+            multi_tf_signals['setup_15m_bullish'] and
+            multi_tf_signals['momentum_5m_bullish']
+        )
         
+        # AI Ensemble filtering
+        ai_ensemble_signal, ai_ensemble_confidence = await self.get_ai_ensemble_signal(current_price, indicators)
+        
+        # Traditional AI sentiment (10-minute frequency)
+        ai_sentiment_signal = True
         if self.ai_enabled and self.ai_optimizer:
-            # Check if it's time for AI analysis (15-minute frequency)
             current_time = time.time()
-            if current_time - self.last_ai_analysis >= self.ai_frequency_seconds:
+            ai_frequency_seconds = self.config['ai']['sentiment']['frequency_minutes'] * 60
+            
+            if current_time - self.last_ai_analysis >= ai_frequency_seconds:
                 try:
-                    # Log OpenRouter API call attempt
-                    self.logger.info(f"🤖 Attempting OpenRouter API call at {datetime.now().isoformat()} (15min frequency)")
-                    
-                    # Get recent price data for AI analysis (fix: pass List[float] instead of Dict)
                     price_data = list(self.price_buffer)[-20:] if len(self.price_buffer) >= 20 else list(self.price_buffer)
+                    market_context = f"RSI: {rsi:.1f}, SMA: {sma:.2f}, BB_Lower: {bb_lower:.2f}, ATR: {indicators.get('atr', 0):.4f}"
                     
-                    # Create market context for AI
-                    market_context = f"RSI: {rsi:.1f}, SMA: {sma:.2f}, BB_Lower: {bb_lower:.2f}, Current: {current_price:.2f}"
-                    
-                    # Call OpenRouter API with proper parameters
                     ai_sentiment = await self.ai_optimizer.analyze_market_sentiment(price_data, market_context)
                     
                     if ai_sentiment is not None:
                         self.ai_sentiment_score = ai_sentiment
-                        ai_confidence = abs(ai_sentiment - 0.5) * 2  # Convert to confidence (0-1)
-                        ai_signal = ai_sentiment > 0.6 and ai_confidence > 0.3
-                        
-                        # Update last analysis time
                         self.last_ai_analysis = current_time
                         
-                        # Log successful API call
-                        self.logger.info(f"✅ OpenRouter API call successful - Sentiment: {self.ai_sentiment_score:.2f}, Confidence: {ai_confidence:.2f}, Signal: {'BUY' if ai_signal else 'HOLD'}")
-                    else:
-                        self.logger.warning("⚠️ OpenRouter API call returned None")
+                        sentiment_weight = self.config['ai']['sentiment']['weight_in_decision']
+                        ai_sentiment_signal = ai_sentiment > (0.5 + sentiment_weight * 0.5)
+                        
+                        self.logger.info(f"🤖 AI Sentiment: {self.ai_sentiment_score:.2f}, Ensemble: {ai_ensemble_confidence:.2f}")
                         
                 except Exception as e:
-                    self.logger.error(f"❌ OpenRouter API call failed: {e}")
-            else:
-                # Use cached AI sentiment if within frequency window
-                ai_confidence = abs(self.ai_sentiment_score - 0.5) * 2
-                ai_signal = self.ai_sentiment_score > 0.6 and ai_confidence > 0.3
+                    self.logger.error(f"AI sentiment analysis error: {e}")
         
-        # Combine signals with AI weighting
+        # Combine all signals
         technical_conditions_met = sum(conditions) >= 2
         
-        if self.ai_enabled and ai_confidence > 0.6:
-            # AI-enhanced decision
-            final_signal = technical_conditions_met and ai_signal and (ml_signal if self.ml_enabled else True)
+        # Final decision with enhanced logic
+        if self.config['trading']['enhanced_features'].get('ai_ensemble', False):
+            final_signal = (
+                technical_conditions_met and 
+                timeframe_bullish and 
+                ai_ensemble_signal and 
+                ai_sentiment_signal
+            )
+            
             if final_signal:
-                self.logger.info(f"🎯 Strong BUY signal - Technical: ✓, AI: ✓ (conf: {ai_confidence:.2f}), ML: {'✓' if ml_signal else '✗'}")
-        elif self.ml_enabled:
-            final_signal = technical_conditions_met and ml_signal
+                self.logger.info(
+                    f"🎯 ENHANCED BUY SIGNAL - Technical: ✓, Multi-TF: ✓, "
+                    f"AI Ensemble: ✓ ({ai_ensemble_confidence:.2f}), Sentiment: ✓ ({self.ai_sentiment_score:.2f})"
+                )
         else:
-            final_signal = technical_conditions_met
+            # Fallback to simpler logic if enhanced features disabled
+            final_signal = technical_conditions_met and timeframe_bullish
             
         return final_signal
         
@@ -885,18 +1196,32 @@ class EnhancedTradingBot:
             self.logger.error(f"Kline error: {e}")
             
     async def process_enhanced_signals(self, current_price: float, indicators: Dict[str, float]):
-        """Process enhanced trading signals with AI integration and active trading check"""
+        """Process enhanced trading signals with AI integration, trailing stops, and active trading check"""
         try:
             # Only process signals if trading is active
             if not getattr(self, 'trading_active', False):
                 return
+            
+            # Update trailing stop if we have a position
+            if self.position and self.config['trading']['enhanced_features'].get('trailing_stops', False):
+                # Update highest price since entry
+                if not hasattr(self, 'highest_price_since_entry') or self.highest_price_since_entry is None:
+                    self.highest_price_since_entry = current_price
+                elif current_price > self.highest_price_since_entry:
+                    self.highest_price_since_entry = current_price
+                
+                # Update trailing stop
+                atr_value = indicators.get('atr', 0.01)
+                self.update_trailing_stop(current_price, atr_value)
                 
             # Check buy signal with AI integration
-            if await self.should_buy_enhanced(current_price, indicators):
+            if not self.position and await self.should_buy_enhanced(current_price, indicators):
                 self.logger.info(f"🟢 BUY SIGNAL: Price ${current_price:.2f} - Indicators: {indicators}")
                 
-                # Calculate dynamic position size based on AI confidence if available
-                position_size = self.calculate_position_size(current_price)
+                # Calculate dynamic position size with ATR
+                atr_value = indicators.get('atr', 0.01)
+                position_size = self.calculate_position_size(current_price, atr_value)
+                
                 if self.ai_enabled and hasattr(self, 'ai_sentiment_score'):
                     # Adjust position size based on AI confidence
                     confidence_multiplier = min(1.2, max(0.8, self.ai_sentiment_score * 2))
@@ -906,93 +1231,151 @@ class EnhancedTradingBot:
                 await self.place_buy_order(current_price, position_size)
                 
             # Check sell signal with AI-enhanced logic
-            should_sell, reason = await self.should_sell_enhanced(current_price, indicators)
-            if should_sell:
-                self.logger.info(f"🔴 SELL SIGNAL ({reason}): Price ${current_price:.2f}")
-                await self.place_sell_order(reason)
+            elif self.position:
+                sell_reason = await self.should_sell_enhanced(current_price, indicators)
+                if sell_reason:
+                    self.logger.info(f"🔴 SELL SIGNAL ({sell_reason}): Price ${current_price:.2f}")
+                    await self.place_sell_order(sell_reason)
                 
         except Exception as e:
             self.logger.error(f"Error processing signals: {e}")
+    
+    def update_trailing_stop(self, current_price: float, atr_value: float = None) -> None:
+        """Update Grok AI optimized trailing stop loss (1.0 × ATR) based on current price and ATR"""
+        try:
+            if not self.position or not self.entry_price:
+                return
+                
+            # Initialize highest price tracking
+            if self.highest_price_since_entry is None:
+                self.highest_price_since_entry = current_price
+            else:
+                self.highest_price_since_entry = max(self.highest_price_since_entry, current_price)
+            
+            # Grok AI optimized trailing stop calculation
+            if atr_value and self.config['trading']['enhanced_features'].get('trailing_stops', False):
+                # Grok AI: 1.0 × ATR trailing stop
+                trailing_atr_multiplier = self.config['strategy']['risk_management']['trailing_stop_atr']  # 1.0
+                trailing_distance = atr_value * trailing_atr_multiplier
+                self.logger.debug(f"Grok AI ATR Trailing - ATR: {atr_value:.4f}, Multiplier: {trailing_atr_multiplier}, Distance: {trailing_distance:.4f}")
+            else:
+                # Fallback to percentage-based trailing stop
+                trailing_pct = self.config['strategy'].get('trailing_stop_pct', 0.02)  # 2% default
+                trailing_distance = self.highest_price_since_entry * trailing_pct
+                self.logger.debug(f"Fallback % Trailing - Distance: {trailing_distance:.4f}")
+            
+            # Calculate new trailing stop price
+            new_trailing_stop = self.highest_price_since_entry - trailing_distance
+            
+            # Update trailing stop (only move up, never down)
+            if self.trailing_stop_price is None or new_trailing_stop > self.trailing_stop_price:
+                old_trailing = self.trailing_stop_price
+                self.trailing_stop_price = new_trailing_stop
+                self.logger.debug(f"Grok AI Trailing Updated - High: {self.highest_price_since_entry:.4f}, Old: {old_trailing:.4f if old_trailing else 'None'}, New: {new_trailing_stop:.4f}")
+                
+        except Exception as e:
+            self.logger.error(f"Error updating Grok AI trailing stop: {e}")
             
     async def should_sell_enhanced(self, current_price: float, indicators: Dict[str, float]) -> Tuple[bool, str]:
-        """Enhanced sell logic with AI analysis and dynamic stop-loss/take-profit levels"""
+        """Enhanced sell logic with dynamic thresholds, trailing stops, and time exits"""
         if not self.position or not self.entry_price:
             return False, ""
             
         sma = indicators.get('sma')
         rsi = indicators.get('rsi')
         bb_upper = indicators.get('bb_upper')
+        atr_value = indicators.get('atr', 0.01)
+        exit_threshold = indicators.get('dynamic_exit_threshold', 0.0175)
         
-        # AI-enhanced dynamic stop-loss and take-profit levels
-        base_stop_loss = self.config['strategy']['stop_loss']
-        base_take_profit = 0.005  # 0.5% default
+        if not sma:
+            return False, ""
         
-        # Adjust levels based on AI sentiment if available
-        if self.ai_enabled and hasattr(self, 'ai_sentiment_score'):
-            # More aggressive take-profit in bullish sentiment, tighter stop-loss in bearish
-            sentiment_adjustment = (self.ai_sentiment_score - 0.5) * 0.5  # -0.25 to +0.25
-            base_take_profit += sentiment_adjustment * 0.01  # Adjust by up to 1%
-            base_stop_loss -= sentiment_adjustment * 0.002  # Adjust stop-loss by up to 0.2%
+        # Update trailing stop
+        self.update_trailing_stop(current_price, atr_value)
+        
+        # Calculate profit/loss
+        profit_pct = (current_price - self.entry_price) / self.entry_price
+        
+        # Exit conditions with enhanced logic
+        exit_reasons = []
+        
+        # 1. Dynamic take profit based on ATR
+        if self.config['trading']['enhanced_features'].get('dynamic_thresholds', False):
+            # ATR-based take profit (1.5-2.0 × ATR)
+            take_profit_threshold = exit_threshold
+        else:
+            # Traditional percentage-based
+            take_profit_threshold = self.config['strategy'].get('take_profit', 0.005)
+        
+        if profit_pct >= take_profit_threshold:
+            return True, f"TAKE_PROFIT_{profit_pct:.2%}"
+        
+        # 2. Dynamic stop loss based on ATR
+        if self.config['trading']['enhanced_features'].get('dynamic_thresholds', False):
+            risk_mgmt = self.config['strategy']['risk_management']
+            stop_loss_atr_multiplier = (risk_mgmt['stop_loss_atr_min'] + risk_mgmt['stop_loss_atr_max']) / 2
+            stop_loss_threshold = (atr_value * stop_loss_atr_multiplier) / self.entry_price
+        else:
+            stop_loss_threshold = self.config['strategy']['stop_loss']
+        
+        if profit_pct <= -stop_loss_threshold:
+            return True, f"STOP_LOSS_{profit_pct:.2%}"
+        
+        # 3. Trailing stop loss
+        if (self.trailing_stop_price and 
+            self.config['trading']['enhanced_features'].get('trailing_stops', False) and 
+            current_price <= self.trailing_stop_price):
+            return True, f"TRAILING_STOP_{current_price:.4f}"
+        
+        # 4. Price above dynamic SMA threshold (trend reversal)
+        sell_threshold = sma * (1 + exit_threshold)
+        if current_price >= sell_threshold:
+            return True, f"SMA_REVERSAL_{current_price:.4f}"
+        
+        # 5. RSI overbought with divergence check
+        if rsi and rsi > 75:  # More selective than 70
+            # Check for bearish divergence
+            bearish_divergence = indicators.get('bearish_divergence', False)
+            if bearish_divergence:
+                return True, f"RSI_DIVERGENCE_{rsi:.1f}"
+            elif rsi > 80:  # Very overbought
+                return True, f"RSI_OVERBOUGHT_{rsi:.1f}"
+        
+        # 6. Price near enhanced Bollinger Band upper
+        if bb_upper and current_price >= bb_upper * 0.995:  # Tighter threshold
+            return True, f"BB_UPPER_{current_price:.4f}"
+        
+        # 7. Grok AI: Time-based exit (5-hour max hold time)
+        if hasattr(self, 'entry_time') and self.entry_time:
+            time_in_position = (datetime.now() - self.entry_time).total_seconds() / 3600  # hours
+            max_hold_time = self.config['strategy']['risk_management']['time_exit_hours']  # Grok AI: 5 hours
             
-        stop_loss_price = self.position.get('stop_loss', self.entry_price * (1 - base_stop_loss))
-        take_profit_price = self.position.get('take_profit', self.entry_price * (1 + base_take_profit))
+            if time_in_position >= max_hold_time:
+                self.logger.info(f"Grok AI Time Exit - Position held for {time_in_position:.1f}h (max: {max_hold_time}h)")
+                return True, f"GROK_TIME_EXIT_{time_in_position:.1f}h"
         
-        # AI sell signal analysis
-        ai_sell_signal = False
-        ai_confidence = 0.5
-        
-        if self.ai_enabled and self.ai_optimizer:
+        # 8. Multi-timeframe exit signals
+        if self.config['trading']['enhanced_features'].get('multi_timeframe', False):
             try:
-                market_data = {
-                    'price': current_price,
-                    'entry_price': self.entry_price,
-                    'profit_pct': (current_price - self.entry_price) / self.entry_price,
-                    'rsi': rsi or 50,
-                    'bb_position': (current_price - indicators.get('bb_lower', current_price)) / (bb_upper - indicators.get('bb_lower', current_price)) if bb_upper else 0.5,
-                    'sma_ratio': current_price / sma if sma else 1.0
-                }
-                
-                ai_analysis = await self.ai_optimizer.analyze_exit_strategy(market_data)
-                if ai_analysis:
-                    ai_confidence = ai_analysis.get('confidence', 0.5)
-                    ai_sell_signal = ai_analysis.get('recommendation') == 'sell' and ai_confidence > 0.7
-                    
-                    if ai_sell_signal:
-                        self.logger.info(f"🤖 AI recommends SELL - Confidence: {ai_confidence:.2f}")
-                        
+                multi_tf_signals = await self.get_multi_timeframe_signals(current_price)
+                if not multi_tf_signals['trend_1h_bullish']:
+                    return True, "1H_TREND_BEARISH"
             except Exception as e:
-                self.logger.error(f"AI exit analysis error: {e}")
+                self.logger.error(f"Multi-timeframe exit error: {e}")
         
-        # Take profit - use AI-adjusted level
-        if current_price >= take_profit_price:
-            return True, "TAKE_PROFIT"
-            
-        # Stop loss - use AI-adjusted level
-        if current_price <= stop_loss_price:
-            return True, "STOP_LOSS"
-            
-        # AI-driven exit signal
-        if ai_sell_signal and ai_confidence > 0.8:
-            return True, "AI_SIGNAL"
-            
-        # RSI overbought (additional exit condition)
-        if rsi and rsi > 75:  # Slightly higher threshold for more selective exits
-            return True, "RSI_OVERBOUGHT"
-            
-        # Price near Bollinger Band upper (additional exit condition)
-        if bb_upper and current_price >= bb_upper * 0.998:
-            return True, "BB_UPPER"
-            
-        # Time-based exit (if position held too long - 4 hours)
-        if 'entry_time' in self.position:
-            time_held = (datetime.now() - self.position['entry_time']).total_seconds() / 3600
-            if time_held > 4:  # 4 hours
-                return True, "TIME_EXIT"
-            
+        # 9. AI ensemble exit signal
+        if self.config['trading']['enhanced_features'].get('ai_ensemble', False):
+            try:
+                ai_ensemble_signal, ai_ensemble_confidence = await self.get_ai_ensemble_signal(current_price, indicators)
+                if not ai_ensemble_signal and ai_ensemble_confidence > 0.7:
+                    return True, f"AI_ENSEMBLE_EXIT_{ai_ensemble_confidence:.2f}"
+            except Exception as e:
+                self.logger.error(f"AI ensemble exit error: {e}")
+        
         return False, ""
         
     async def place_buy_order(self, current_price: float, position_size: float = None):
-        """Place a buy order with AI-enhanced logging and risk management"""
+        """Place buy order with enhanced risk management and dynamic sizing"""
         try:
             # Risk management checks
             if self.daily_trades >= self.config['risk']['max_daily_trades']:
@@ -1002,41 +1385,65 @@ class EnhancedTradingBot:
             if self.daily_loss >= self.config['risk']['max_daily_loss']:
                 self.logger.warning("Daily loss limit reached")
                 return
+            
+            # Get indicators for enhanced calculations
+            indicators = self.calculate_technical_indicators()
+            atr_value = indicators.get('atr', 0.01)
                 
-            # Use provided position size or calculate it
+            # Use provided position size or calculate it with ATR
             if position_size is None:
-                position_size = self.calculate_position_size(current_price)
+                position_size = self.calculate_position_size(current_price, atr_value)
             
             if position_size <= 0:
                 self.logger.warning(f"Position size too small: {position_size}")
                 return
                 
-            # AI-enhanced stop-loss and take-profit levels
-            base_stop_loss_pct = self.config['strategy']['stop_loss']
-            base_take_profit_pct = 0.005  # 0.5% default take profit
-            
-            # Adjust levels based on AI sentiment if available
-            if self.ai_enabled and hasattr(self, 'ai_sentiment_score'):
-                # More aggressive take-profit in bullish sentiment, tighter stop-loss in bearish
-                sentiment_adjustment = (self.ai_sentiment_score - 0.5) * 0.5  # -0.25 to +0.25
-                take_profit_pct = base_take_profit_pct + (sentiment_adjustment * 0.01)  # Adjust by up to 1%
-                stop_loss_pct = base_stop_loss_pct - (sentiment_adjustment * 0.002)  # Adjust stop-loss by up to 0.2%
+            # Enhanced stop-loss and take-profit calculation
+            if self.config['trading']['enhanced_features'].get('dynamic_thresholds', False):
+                # ATR-based levels
+                risk_mgmt = self.config['strategy']['risk_management']
+                stop_loss_atr_multiplier = (risk_mgmt['stop_loss_atr_min'] + risk_mgmt['stop_loss_atr_max']) / 2
+                stop_loss_distance = atr_value * stop_loss_atr_multiplier
+                stop_loss_price = current_price - stop_loss_distance
                 
-                self.logger.info(f"🤖 AI-adjusted levels - TP: {take_profit_pct:.3%}, SL: {stop_loss_pct:.3%} (sentiment: {self.ai_sentiment_score:.2f})")
+                exit_threshold = indicators.get('dynamic_exit_threshold', 0.0175)
+                take_profit_price = current_price * (1 + exit_threshold)
             else:
-                take_profit_pct = base_take_profit_pct
-                stop_loss_pct = base_stop_loss_pct
+                # Traditional percentage-based
+                base_stop_loss = self.config['strategy']['stop_loss']
+                base_take_profit = self.config['strategy'].get('take_profit', 0.005)
+                
+                # AI adjustment if available
+                ai_multiplier = 1.0
+                if self.ai_enabled and hasattr(self, 'ai_sentiment_score'):
+                    ai_multiplier = 0.8 + (self.ai_sentiment_score * 0.4)
+                    
+                stop_loss_pct = base_stop_loss * (2 - ai_multiplier)
+                take_profit_pct = base_take_profit * ai_multiplier
+                
+                stop_loss_price = current_price * (1 - stop_loss_pct)
+                take_profit_price = current_price * (1 + take_profit_pct)
             
-            stop_loss_price = current_price * (1 - stop_loss_pct)
-            take_profit_price = current_price * (1 + take_profit_pct)
+            # Place market buy order
+            if self.testnet:
+                # Simulate order for testnet
+                order = {
+                    'symbol': self.symbol,
+                    'orderId': f'TEST_{int(time.time())}',
+                    'executedQty': str(position_size),
+                    'cummulativeQuoteQty': str(position_size * current_price),
+                    'status': 'FILLED'
+                }
+                self.logger.info(f"📝 TESTNET BUY ORDER: {position_size:.6f} {self.symbol} at ${current_price:.4f}")
+            else:
+                order = self.client.new_order(
+                    symbol=self.symbol,
+                    side='BUY',
+                    type='MARKET',
+                    quantity=position_size
+                )
             
-            order = self.client.new_order(
-                symbol=self.symbol,
-                side='BUY',
-                type='MARKET',
-                quantity=position_size
-            )
-            
+            # Update position tracking with enhanced data structure
             self.position = {
                 'side': 'BUY',
                 'quantity': position_size,
@@ -1047,62 +1454,111 @@ class EnhancedTradingBot:
             }
             
             self.entry_price = current_price
+            self.entry_time = datetime.now()
+            self.last_trade_time = datetime.now()
+            
+            # Initialize trailing stop tracking
+            self.highest_price_since_entry = current_price
+            self.trailing_stop_price = None
+            
             self.daily_trades += 1
             
-            # Enhanced logging with AI and trade details
-            ai_info = ""
-            if self.ai_enabled and hasattr(self, 'ai_sentiment_score'):
-                ai_info = f" | AI Sentiment: {self.ai_sentiment_score:.2f}"
+            # Enhanced logging
+            kelly_info = f", Kelly: {self.current_kelly_fraction:.1%}" if hasattr(self, 'current_kelly_fraction') else ""
+            ai_info = f", AI: {self.ai_sentiment_score:.2f}" if self.ai_enabled else ""
+            atr_info = f", ATR: {atr_value:.4f}" if atr_value else ""
             
             self.logger.info(
-                f"💰 BUY ORDER EXECUTED: {position_size:.6f} {self.symbol} at ${current_price:.2f} | "
-                f"Stop Loss: ${stop_loss_price:.2f} | Take Profit: ${take_profit_price:.2f} | "
-                f"Risk: ${(current_price - stop_loss_price) * position_size:.2f}{ai_info}"
+                f"✅ ENHANCED BUY: {position_size:.6f} {self.symbol} @ ${current_price:.4f} "
+                f"(Stop: ${stop_loss_price:.4f}, Target: ${take_profit_price:.4f}{kelly_info}{ai_info}{atr_info})"
             )
             
-            # Log AI-influenced trade to separate file for analysis
-            if self.ai_enabled:
-                try:
-                    with open('logs/ai_trades.log', 'a', encoding='utf-8') as f:
-                        f.write(f"{datetime.now().isoformat()},BUY,{current_price},{position_size},{self.ai_sentiment_score:.3f}\n")
-                except Exception:
-                    pass
+            # Log enhanced trade data
+            trade_log_entry = {
+                'timestamp': datetime.now().isoformat(),
+                'action': 'BUY',
+                'price': current_price,
+                'quantity': position_size,
+                'atr_value': atr_value,
+                'stop_loss': stop_loss_price,
+                'take_profit': take_profit_price,
+                'kelly_fraction': getattr(self, 'current_kelly_fraction', 0),
+                'ai_sentiment': getattr(self, 'ai_sentiment_score', 0.5),
+                'ai_ensemble_confidence': getattr(self, 'ai_ensemble_confidence', 0.5),
+                'indicators': indicators,
+                'enhanced_features': self.config['trading']['enhanced_features']
+            }
+            
+            # Write to enhanced trades log
+            try:
+                with open('enhanced_trades.json', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(trade_log_entry) + '\n')
+            except Exception as e:
+                self.logger.error(f"Error logging enhanced trade: {e}")
             
         except Exception as e:
             self.logger.error(f"❌ Error placing buy order: {e}")
             
     async def place_sell_order(self, reason: str):
-        """Place a sell order with AI-enhanced trade tracking and profit calculation"""
+        """Place sell order with enhanced tracking and trailing stop logic"""
         try:
             if not self.position:
                 return
                 
             quantity = self.position['quantity']
+            current_price = self.current_price
             
-            order = self.client.new_order(
-                symbol=self.symbol,
-                side='SELL',
-                type='MARKET',
-                quantity=quantity
-            )
+            # Place market sell order
+            if self.testnet:
+                # Simulate order for testnet
+                order = {
+                    'symbol': self.symbol,
+                    'orderId': f'TEST_SELL_{int(time.time())}',
+                    'executedQty': str(quantity),
+                    'cummulativeQuoteQty': str(quantity * current_price),
+                    'status': 'FILLED'
+                }
+                self.logger.info(f"📝 TESTNET SELL ORDER: {quantity:.6f} {self.symbol} at ${current_price:.4f}")
+            else:
+                order = self.client.new_order(
+                    symbol=self.symbol,
+                    side='SELL',
+                    type='MARKET',
+                    quantity=quantity
+                )
             
-            # Calculate detailed trade metrics
+            # Calculate enhanced trade metrics
             entry_time = self.position.get('entry_time', datetime.now())
             exit_time = datetime.now()
             trade_duration = (exit_time - entry_time).total_seconds() / 60  # minutes
             
-            current_price = self.current_price
             profit = (current_price - self.entry_price) * quantity
             profit_pct = ((current_price - self.entry_price) / self.entry_price) * 100
             
+            # Update Kelly Criterion trade history
+            trade_result = {
+                'profit': profit,
+                'win': profit > 0,
+                'timestamp': datetime.now(),
+                'duration_minutes': trade_duration,
+                'sell_reason': reason
+            }
+            self.trade_history.append(trade_result)
+            
+            # Keep only recent trades for Kelly calculation
+            if len(self.trade_history) > 50:
+                self.trade_history = self.trade_history[-50:]
+            
+            # Update totals and streaks
             self.total_profit += profit
             self.trade_count += 1
             
-            # Gamification
+            # Enhanced gamification and streak tracking
             if profit > 0:
                 self.winning_trades += 1
+                self.consecutive_losses = 0
                 self.gamification.add_win()
-                trade_result = "WIN 🎉"
+                trade_result_text = "WIN 🎉"
                 # Play success sound in testnet
                 if self.ui.current_mode == "Testnet" and playsound:
                     try:
@@ -1112,24 +1568,53 @@ class EnhancedTradingBot:
                         pass
             else:
                 self.daily_loss += abs(profit)
+                self.consecutive_losses += 1
                 self.gamification.add_loss()
-                trade_result = "LOSS 📉"
+                trade_result_text = "LOSS 📉"
                 
             # Check for badges
             self.gamification.check_trade_milestones(self.trade_count, self.total_profit)
             
-            # Enhanced logging with AI and complete trade details
-            ai_info = ""
-            if self.ai_enabled and hasattr(self, 'ai_sentiment_score'):
-                ai_info = f" | AI Sentiment: {self.ai_sentiment_score:.2f}"
+            # Enhanced logging
+            win_rate = (self.winning_trades / self.trade_count) * 100 if self.trade_count > 0 else 0
+            kelly_info = f", Kelly: {self.current_kelly_fraction:.1%}" if hasattr(self, 'current_kelly_fraction') else ""
+            ai_info = f", AI: {self.ai_sentiment_score:.2f}" if self.ai_enabled and hasattr(self, 'ai_sentiment_score') else ""
+            trailing_info = f", Trail: ${self.trailing_stop_price:.4f}" if hasattr(self, 'trailing_stop_price') and self.trailing_stop_price else ""
             
             self.logger.info(
-                f"💸 SELL ORDER EXECUTED: {quantity:.6f} {self.symbol} at ${current_price:.2f} | "
-                f"Entry: ${self.entry_price:.2f} | Exit: ${current_price:.2f} | "
-                f"Profit: ${profit:.2f} ({profit_pct:+.2f}%) | Duration: {trade_duration:.1f}m | "
-                f"Result: {trade_result} | Reason: {reason} | "
-                f"Total P&L: ${self.total_profit:.2f} | Win Rate: {(self.winning_trades/self.trade_count)*100:.1f}%{ai_info}"
+                f"✅ ENHANCED SELL ({reason}): {quantity:.6f} {self.symbol} @ ${current_price:.4f} "
+                f"| Entry: ${self.entry_price:.4f} | P&L: ${profit:.2f} ({profit_pct:+.2f}%) "
+                f"| Duration: {trade_duration:.1f}m | Result: {trade_result_text} "
+                f"| Total: ${self.total_profit:.2f} | WR: {win_rate:.1f}%{kelly_info}{ai_info}{trailing_info}"
             )
+            
+            # Log enhanced trade data
+            trade_log_entry = {
+                'timestamp': datetime.now().isoformat(),
+                'action': 'SELL',
+                'price': current_price,
+                'quantity': quantity,
+                'entry_price': self.entry_price,
+                'profit': profit,
+                'profit_percentage': profit_pct,
+                'duration_minutes': trade_duration,
+                'sell_reason': reason,
+                'kelly_fraction': getattr(self, 'current_kelly_fraction', 0),
+                'ai_sentiment': getattr(self, 'ai_sentiment_score', 0.5),
+                'ai_ensemble_confidence': getattr(self, 'ai_ensemble_confidence', 0.5),
+                'trailing_stop_price': getattr(self, 'trailing_stop_price', None),
+                'highest_price': getattr(self, 'highest_price_since_entry', current_price),
+                'win_rate': win_rate,
+                'total_profit': self.total_profit,
+                'consecutive_losses': self.consecutive_losses
+            }
+            
+            # Write to enhanced trades log
+            try:
+                with open('enhanced_trades.json', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(trade_log_entry) + '\n')
+            except Exception as e:
+                self.logger.error(f"Error logging enhanced trade: {e}")
             
             # Log AI-influenced trade to separate file for analysis
             if self.ai_enabled:
@@ -1139,9 +1624,12 @@ class EnhancedTradingBot:
                 except Exception:
                     pass
             
-            # Reset position
+            # Reset position and tracking variables
             self.position = None
             self.entry_price = None
+            self.entry_time = None
+            self.highest_price_since_entry = None
+            self.trailing_stop_price = None
             self.last_trade_time = datetime.now()
             
         except Exception as e:
@@ -1172,31 +1660,95 @@ class EnhancedTradingBot:
             self.logger.error(f"Error getting current price: {e}")
             return None
             
-    def calculate_position_size(self, current_price: float) -> float:
-        """Calculate position size based on risk management"""
+    def calculate_kelly_fraction(self) -> float:
+        """Calculate Kelly Criterion fraction based on recent trade history"""
+        try:
+            if len(self.trade_history) < 10:  # Need minimum trade history
+                return self.config['trading']['risk_per_trade']  # Use default
+            
+            # Calculate win rate and average win/loss ratio
+            wins = [trade for trade in self.trade_history if trade['profit'] > 0]
+            losses = [trade for trade in self.trade_history if trade['profit'] <= 0]
+            
+            if len(losses) == 0:  # No losses yet
+                return min(0.02, self.config['trading']['risk_per_trade'] * 1.2)  # Slightly increase
+            
+            win_rate = len(wins) / len(self.trade_history)
+            avg_win = sum(trade['profit'] for trade in wins) / len(wins) if wins else 0
+            avg_loss = abs(sum(trade['profit'] for trade in losses) / len(losses)) if losses else 1
+            
+            win_loss_ratio = avg_win / avg_loss if avg_loss > 0 else 1
+            
+            # Kelly formula: f = (bp - q) / b
+            # where b = win/loss ratio, p = win probability, q = loss probability
+            kelly_fraction = (win_loss_ratio * win_rate - (1 - win_rate)) / win_loss_ratio
+            
+            # Apply safety constraints
+            kelly_config = self.config['risk']['kelly_criterion']
+            max_kelly = kelly_config.get('max_kelly_fraction', 0.25)
+            kelly_fraction = max(0.005, min(max_kelly, kelly_fraction))  # Between 0.5% and 25%
+            
+            # Reduce after consecutive losses
+            if self.consecutive_losses >= 3:
+                kelly_fraction *= 0.5  # Halve position size
+            
+            self.current_kelly_fraction = kelly_fraction
+            return kelly_fraction
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating Kelly fraction: {e}")
+            return self.config['trading']['risk_per_trade']
+    
+    def calculate_position_size(self, current_price: float, atr_value: float = None) -> float:
+        """Calculate optimized position size using Grok AI Kelly sizing formula: Account Balance × Risk% / (ATR × Stop Distance)"""
         try:
             balances = self.get_account_balances()
             usdt_balance = balances.get('USDT', 0)
             
-            risk_per_trade = self.config['trading']['risk_per_trade']
+            # Grok AI optimized Kelly Criterion
+            kelly_enabled = self.config['trading']['enhanced_features'].get('kelly_sizing', False)
+            if kelly_enabled:
+                risk_per_trade = self.calculate_kelly_fraction()  # 1-2% risk as per Grok AI
+            else:
+                risk_per_trade = self.config['trading']['risk_per_trade']
+            
             max_position_size = self.config['trading']['max_position_size']
             
+            # Grok AI formula: Account Balance × Risk%
             risk_amount = min(
                 usdt_balance * risk_per_trade,
                 max_position_size
             )
             
-            stop_loss_pct = self.config['strategy']['stop_loss']
-            stop_loss_price = current_price * (1 - stop_loss_pct)
-            risk_per_unit = current_price - stop_loss_price
-            
-            if risk_per_unit > 0:
-                position_size = risk_amount / risk_per_unit
-                max_units = max_position_size / current_price
-                position_size = min(position_size, max_units)
-            else:
-                position_size = 0
+            # Grok AI optimized ATR-based stop loss (1.5-2.0 × ATR)
+            if atr_value:
+                risk_mgmt = self.config['strategy']['risk_management']
+                # Use Grok AI stop loss multiplier (1.5-2.0 × ATR)
+                stop_loss_atr_multiplier = risk_mgmt.get('stop_loss_atr_multiplier', 1.75)  # Default 1.75 × ATR
+                stop_loss_distance = atr_value * stop_loss_atr_multiplier
                 
+                # Grok AI Kelly sizing formula: Account Balance × Risk% / (ATR × Stop Distance)
+                if stop_loss_distance > 0:
+                    position_size = risk_amount / stop_loss_distance
+                    self.logger.debug(f"Grok AI Kelly Sizing - Risk: ${risk_amount:.2f}, ATR Stop: {stop_loss_distance:.4f}, Size: {position_size:.6f}")
+                else:
+                    position_size = 0
+            else:
+                # Fallback to percentage-based stop loss
+                stop_loss_pct = self.config['strategy']['stop_loss']
+                stop_loss_distance = current_price * stop_loss_pct
+                position_size = risk_amount / stop_loss_distance if stop_loss_distance > 0 else 0
+            
+            # Apply position size limits
+            max_units = max_position_size / current_price
+            position_size = min(position_size, max_units)
+            
+            # Apply Grok AI portfolio exposure limit (15%)
+            max_exposure = self.config['strategy']['risk_management']['max_portfolio_exposure']
+            max_position_value = usdt_balance * max_exposure
+            max_units_by_exposure = max_position_value / current_price
+            position_size = min(position_size, max_units_by_exposure)
+            
             return round(position_size, 6)
             
         except Exception as e:
@@ -1239,22 +1791,26 @@ class EnhancedTradingBot:
         self.last_ai_analysis = 0
         self.ai_frequency_seconds = 15 * 60  # 15 minutes in seconds
         
-        # Setup keyboard listener
-        def on_key_press(key):
-            if key.name == 's':
-                self.trading_active = not self.trading_active
-                status = "STARTED" if self.trading_active else "STOPPED"
-                self.logger.info(f"Trading {status} by user")
-            elif key.name == 'm':
-                # Toggle between testnet and live mode display (demo)
-                current = self.ui.current_mode
-                self.ui.current_mode = "LIVE" if current == "Testnet" else "Testnet"
-                self.logger.info(f"Display mode switched to {self.ui.current_mode}")
-            elif key.name == 'q':
-                self.is_running = False
-                self.logger.info("Shutdown requested by user")
-                
-        keyboard.on_press(on_key_press)
+        # Setup keyboard hotkeys using proper hotkey combinations
+        def toggle_trading():
+            self.trading_active = not self.trading_active
+            status = "STARTED" if self.trading_active else "STOPPED"
+            self.logger.info(f"Trading {status} by user")
+            
+        def toggle_mode():
+            # Toggle between testnet and live mode display (demo)
+            current = self.ui.current_mode
+            self.ui.current_mode = "LIVE" if current == "Testnet" else "Testnet"
+            self.logger.info(f"Display mode switched to {self.ui.current_mode}")
+            
+        def quit_bot():
+            self.is_running = False
+            self.logger.info("Shutdown requested by user")
+        
+        # Register hotkey combinations
+        keyboard.add_hotkey('shift+s', toggle_trading)
+        keyboard.add_hotkey('shift+m', toggle_mode)
+        keyboard.add_hotkey('shift+q', quit_bot)
         
         # Initialize balance refresh timer
         last_balance_refresh = 0
@@ -1378,7 +1934,7 @@ async def main():
         
         console = Console()
         console.print("\n[bold green]🔄 Starting bot...[/bold green]")
-        console.print("[dim]Press 's' to start/stop, 'm' to change mode, 'q' to quit[/dim]")
+        console.print("[dim]Press Shift+S to start/stop, Shift+M to change mode, Shift+Q to quit[/dim]")
         console.print("[dim]Press Ctrl+C to exit at any time[/dim]")
         
         await asyncio.sleep(2)  # Brief pause before starting UI

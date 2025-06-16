@@ -25,6 +25,10 @@ requests==2.31.0
 # Modern CLI UI
 rich==13.7.0
 
+# Web Dashboard
+flask==2.3.3
+gunicorn==21.2.0
+
 # Machine Learning for enhanced strategies
 xgboost==2.0.3
 scikit-learn==1.3.0
