@@ -1,21 +1,15 @@
 [variables]
-# Optimize Python build for numerical libraries
-PIP_NO_CACHE_DIR = "1"
-PIP_DISABLE_PIP_VERSION_CHECK = "1"
-PIP_ONLY_BINARY = ":all:"
+# Force Python 3.10
+NIXPACKS_PYTHON_VERSION = "3.10"
 
 # Increase build timeout for heavy dependencies
 NIXPACKS_BUILD_TIMEOUT = "1800"
 
-# Memory optimization
+# Memory and performance optimization
 PYTHONUNBUFFERED = "1"
 PYTHONDONTWRITEBYTECODE = "1"
-
-# Enable verbose logging
-PIP_VERBOSE = "1"
-
-# Force Python 3.10
-NIXPACKS_PYTHON_VERSION = "3.10"
+PIP_NO_CACHE_DIR = "1"
+PIP_DISABLE_PIP_VERSION_CHECK = "1"
 
 [phases.setup]
 cmds = [
@@ -26,7 +20,7 @@ cmds = [
 [phases.install]
 cmds = [
   "pip install --upgrade pip setuptools wheel",
-  "pip install --no-cache-dir --only-binary=:all: -r requirements.txt"
+  "pip install --no-cache-dir --only-binary=:all: --timeout 300 -r requirements.txt"
 ]
 
 [phases.build]
