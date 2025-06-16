@@ -35,5 +35,5 @@ cmds = [
 cmd = "gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 app:app"
 
 [build]
-# Ensure we use Python 3.11+ for better wheel compatibility
-pythonVersion = "3.11"
+# Use Python 3.10 for better package compatibility
+pythonVersion = "3.10"
