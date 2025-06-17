@@ -33,13 +33,17 @@ except ImportError:
     talib = None
 
 # ML imports
+# Handle ML imports separately to avoid all-or-nothing failure
 try:
     import xgboost as xgb
+except ImportError:
+    xgb = None
+
+try:
     from sklearn.preprocessing import StandardScaler
     from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
     from sklearn.metrics import mean_squared_error, r2_score
 except ImportError:
-    xgb = None
     StandardScaler = None
     train_test_split = None
     GridSearchCV = None

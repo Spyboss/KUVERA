@@ -33,16 +33,22 @@ from rich import box
 # keyboard import removed - no longer needed for automated mode
 import threading
 
-# AI and ML imports
+# AI and ML imports - Handle each import separately
 try:
     import xgboost as xgb
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.model_selection import GridSearchCV
-    import talib
 except ImportError:
     xgb = None
+
+try:
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.model_selection import GridSearchCV
+except ImportError:
     StandardScaler = None
     GridSearchCV = None
+
+try:
+    import talib
+except ImportError:
     talib = None
 
 # Import AI components
