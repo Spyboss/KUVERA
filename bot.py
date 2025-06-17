@@ -510,6 +510,10 @@ class EnhancedTradingBot:
     def setup_ml_components(self):
         """Setup ML components with enhanced fallback strategy"""
         try:
+            # Debug: Check import status
+            self.logger.info(f"🔍 Debug - xgb available: {xgb is not None}")
+            self.logger.info(f"🔍 Debug - StandardScaler available: {StandardScaler is not None}")
+            
             # Check if XGBoost and sklearn are available
             if xgb and StandardScaler:
                 self.ml_model = xgb.XGBRegressor(
@@ -528,6 +532,10 @@ class EnhancedTradingBot:
             else:
                 self.ml_enabled = False
                 self.logger.warning("⚠️ XGBoost not available, using Enhanced Mean Reversion with RSI/Bollinger Bands")
+                if not xgb:
+                    self.logger.warning("🔍 Debug - XGBoost import failed")
+                if not StandardScaler:
+                    self.logger.warning("🔍 Debug - StandardScaler import failed")
                 
         except ImportError as e:
             self.ml_enabled = False
@@ -1247,10 +1255,21 @@ class EnhancedTradingBot:
                 self.daily_loss = 0.0
                 self.week_start_profit = self.total_profit  # Reset weekly tracking
                 
-            # Process trading signals
-            task = asyncio.create_task(self.process_enhanced_signals(close_price, indicators))
-            # Add exception handler to prevent unawaited coroutine warnings
-            task.add_done_callback(lambda t: t.exception() if t.exception() else None)
+            # Process trading signals with proper event loop handling
+            try:
+                # Check if there's a running event loop
+                loop = asyncio.get_running_loop()
+                task = asyncio.create_task(self.process_enhanced_signals(close_price, indicators))
+                # Add exception handler to prevent unawaited coroutine warnings
+                task.add_done_callback(lambda t: t.exception() if t.exception() else None)
+            except RuntimeError:
+                # No event loop running, run in new event loop
+                try:
+                    asyncio.run(self.process_enhanced_signals(close_price, indicators))
+                except Exception as async_e:
+                    self.logger.error(f"Async signal processing error: {async_e}")
+            except Exception as loop_e:
+                self.logger.error(f"Event loop error: {loop_e}")
             
         except Exception as e:
             self.logger.error(f"Kline error: {e}")
