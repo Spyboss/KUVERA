@@ -30,9 +30,9 @@ rich==13.7.0
 flask==2.3.3
 gunicorn==21.2.0
 
-# Machine Learning for enhanced strategies (pre-compiled wheels for Railway)
-xgboost==2.0.3 --only-binary=all
-scikit-learn==1.3.0 --only-binary=all
+# Machine Learning for enhanced strategies
+xgboost==2.0.3
+scikit-learn==1.3.0
 
 # Technical indicators (Railway-compatible)
 # Use TA-Lib alternative that works with Python 3.11
