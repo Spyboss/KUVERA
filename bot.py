@@ -1248,7 +1248,9 @@ class EnhancedTradingBot:
                 self.week_start_profit = self.total_profit  # Reset weekly tracking
                 
             # Process trading signals
-            asyncio.create_task(self.process_enhanced_signals(close_price, indicators))
+            task = asyncio.create_task(self.process_enhanced_signals(close_price, indicators))
+            # Add exception handler to prevent unawaited coroutine warnings
+            task.add_done_callback(lambda t: t.exception() if t.exception() else None)
             
         except Exception as e:
             self.logger.error(f"Kline error: {e}")
