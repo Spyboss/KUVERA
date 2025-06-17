@@ -1857,6 +1857,55 @@ class EnhancedTradingBot:
         self.logger.info(f"Max Streak: {self.gamification.max_streak}")
         self.logger.info(f"Badges Earned: {len(self.gamification.badges)}")
         
+    async def run_ai_analysis(self):
+        """Run AI analysis for trading decisions"""
+        try:
+            if not self.ai_enabled or not self.auto_trader:
+                self.logger.debug("AI analysis skipped - AI not enabled or auto_trader not available")
+                return
+            
+            # Get current market data
+            current_price = self.current_price
+            if not current_price:
+                self.logger.warning("No current price available for AI analysis")
+                return
+            
+            # Prepare market data for AI analysis
+            market_data = {
+                'current_price': current_price,
+                'price_buffer': list(self.price_buffer)[-50:] if self.price_buffer else [],
+                'position': self.position,
+                'total_profit': self.total_profit,
+                'trade_count': self.trade_count,
+                'daily_trades': self.daily_trades
+            }
+            
+            # Run AI analysis through auto_trader
+            if hasattr(self.auto_trader, 'analyze_market_conditions'):
+                analysis_result = await self.auto_trader.analyze_market_conditions(market_data)
+                
+                # Update AI sentiment and confidence scores
+                if analysis_result:
+                    self.ai_sentiment_score = analysis_result.get('sentiment', 0.5)
+                    self.ai_ensemble_confidence = analysis_result.get('confidence', 0.5)
+                    
+                    self.logger.debug(f"AI Analysis - Sentiment: {self.ai_sentiment_score:.2f}, Confidence: {self.ai_ensemble_confidence:.2f}")
+            else:
+                # Fallback: Simple AI sentiment calculation
+                if len(self.price_buffer) >= 10:
+                    recent_prices = list(self.price_buffer)[-10:]
+                    price_trend = (recent_prices[-1] - recent_prices[0]) / recent_prices[0]
+                    self.ai_sentiment_score = max(0.0, min(1.0, 0.5 + price_trend * 10))
+                    self.ai_ensemble_confidence = 0.6  # Default confidence
+                    
+                    self.logger.debug(f"Fallback AI Analysis - Sentiment: {self.ai_sentiment_score:.2f}")
+            
+        except Exception as e:
+            self.logger.error(f"Error in AI analysis: {e}")
+            # Set default values on error
+            self.ai_sentiment_score = 0.5
+            self.ai_ensemble_confidence = 0.5
+
     async def run_automated(self):
         """Run bot in automated mode for Railway deployment"""
         self.logger.info("Starting Kuvera Grid v1.1 in automated mode 🚀")
