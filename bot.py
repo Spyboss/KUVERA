@@ -30,7 +30,7 @@ from rich.layout import Layout
 from rich.live import Live
 from rich.text import Text
 from rich import box
-import keyboard
+# keyboard import removed - no longer needed for automated mode
 import threading
 
 # AI and ML imports
@@ -382,6 +382,17 @@ class EnhancedTradingBot:
         self.weekly_target = 2.0  # $2 per week
         self.week_start_profit = self.total_profit
         
+    def get_server_time(self, base_url):
+        """Get Binance server time for synchronization"""
+        import requests
+        try:
+            response = requests.get(f"{base_url}/api/v3/time", timeout=5)
+            if response.status_code == 200:
+                return response.json()['serverTime']
+        except Exception as e:
+            self.logger.warning(f"Could not get server time: {e}")
+        return int(time.time() * 1000)
+        
     def setup_logging(self):
         """Setup logging configuration with UTF-8 encoding"""
         os.makedirs('logs', exist_ok=True)
@@ -416,7 +427,7 @@ class EnhancedTradingBot:
         self.logger.info("Logging system initialized with UTF-8 encoding 🚀")
         
     def setup_binance_client(self):
-        """Setup Binance API client"""
+        """Setup Binance API client with improved timestamp synchronization"""
         testnet_mode = getattr(self, 'testnet_mode', self.config['api']['testnet'])
         self.testnet_mode = testnet_mode  # Store as instance attribute
         
@@ -438,19 +449,63 @@ class EnhancedTradingBot:
             self.logger.error(f"API credentials not found for {mode_str} mode")
             raise ValueError(f"Missing {mode_str} API credentials")
             
+        # Enhanced time synchronization with multiple attempts
+        self.time_offset = 0
+        self.recv_window = int(os.getenv('BINANCE_RECV_WINDOW', '60000'))
+        
+        for attempt in range(3):
+            try:
+                server_time = self.get_server_time(base_url)
+                local_time = int(time.time() * 1000)
+                self.time_offset = server_time - local_time
+                self.logger.info(f"Time sync attempt {attempt + 1}: offset = {self.time_offset}ms")
+                break
+            except Exception as e:
+                self.logger.warning(f"Time sync attempt {attempt + 1} failed: {e}")
+                if attempt == 2:
+                    self.logger.warning("Using local time without offset")
+                    self.time_offset = 0
+                time.sleep(1)
+            
         self.client = Spot(
             api_key=api_key,
             api_secret=api_secret,
             base_url=base_url
         )
         
-        # Test connection
+        # Test connection with multiple strategies
+        connection_successful = False
+        
+        # Strategy 1: Use server time with offset
         try:
-            account_info = self.client.account(recvWindow=60000)
-            self.logger.info("Successfully connected to Binance API")
+            timestamp = int(time.time() * 1000) + self.time_offset
+            account_info = self.client.account(recvWindow=self.recv_window, timestamp=timestamp)
+            self.logger.info("✅ Connected to Binance API with time offset")
+            connection_successful = True
         except Exception as e:
-            self.logger.error(f"Failed to connect to Binance API: {e}")
-            raise
+            self.logger.warning(f"Connection with offset failed: {e}")
+            
+        # Strategy 2: Use fresh server time
+        if not connection_successful:
+            try:
+                fresh_server_time = self.get_server_time(base_url)
+                account_info = self.client.account(recvWindow=self.recv_window, timestamp=fresh_server_time)
+                self.logger.info("✅ Connected to Binance API with fresh server time")
+                connection_successful = True
+            except Exception as e:
+                self.logger.warning(f"Connection with fresh server time failed: {e}")
+                
+        # Strategy 3: Use default timestamp with extended window
+        if not connection_successful:
+            try:
+                account_info = self.client.account(recvWindow=self.recv_window)
+                self.logger.info("✅ Connected to Binance API with default timestamp")
+                connection_successful = True
+            except Exception as e:
+                self.logger.error(f"All connection attempts failed: {e}")
+                
+        if not connection_successful:
+            raise Exception("Could not establish connection to Binance API after all attempts")
             
     def setup_ml_components(self):
         """Setup ML components with enhanced fallback strategy"""
@@ -890,7 +945,10 @@ class EnhancedTradingBot:
             return self._cached_balances
             
         try:
-            account_info = self.client.account(recvWindow=60000)
+            # Use improved timestamp handling
+            timestamp = int(time.time() * 1000) + getattr(self, 'time_offset', 0)
+            recv_window = getattr(self, 'recv_window', 60000)
+            account_info = self.client.account(recvWindow=recv_window, timestamp=timestamp)
             balances = {}
             
             for balance in account_info['balances']:
@@ -1436,11 +1494,16 @@ class EnhancedTradingBot:
                 }
                 self.logger.info(f"📝 TESTNET BUY ORDER: {position_size:.6f} {self.symbol} at ${current_price:.4f}")
             else:
+                # Use improved timestamp handling for orders
+                timestamp = int(time.time() * 1000) + getattr(self, 'time_offset', 0)
+                recv_window = getattr(self, 'recv_window', 60000)
                 order = self.client.new_order(
                     symbol=self.symbol,
                     side='BUY',
                     type='MARKET',
-                    quantity=position_size
+                    quantity=position_size,
+                    recvWindow=recv_window,
+                    timestamp=timestamp
                 )
             
             # Update position tracking with enhanced data structure
@@ -1520,11 +1583,16 @@ class EnhancedTradingBot:
                 }
                 self.logger.info(f"📝 TESTNET SELL ORDER: {quantity:.6f} {self.symbol} at ${current_price:.4f}")
             else:
+                # Use improved timestamp handling for orders
+                timestamp = int(time.time() * 1000) + getattr(self, 'time_offset', 0)
+                recv_window = getattr(self, 'recv_window', 60000)
                 order = self.client.new_order(
                     symbol=self.symbol,
                     side='SELL',
                     type='MARKET',
-                    quantity=quantity
+                    quantity=quantity,
+                    recvWindow=recv_window,
+                    timestamp=timestamp
                 )
             
             # Calculate enhanced trade metrics
@@ -1769,82 +1837,7 @@ class EnhancedTradingBot:
         except Exception as e:
             self.logger.error(f"WebSocket error: {e}")
             
-    async def run_with_ui(self):
-        """Run bot with modern UI and real-time updates"""
-        self.logger.info("Starting Kuvera Grid v1.1 🚀")
-        self.is_running = True
-        self.trading_active = False
-        
-        # Run diagnostic tests if enabled
-        if self.diagnostic_mode:
-            self.logger.info("🔍 Diagnostic mode enabled - Running connectivity tests...")
-            await self.test_openrouter_connectivity()
-        
-        # Execute startup test trade if enabled
-        if self.startup_test_enabled:
-            await self.execute_startup_test_trade()
-        
-        # Start WebSocket
-        await self.start_websocket()
-        
-        # Initialize AI analysis timer
-        self.last_ai_analysis = 0
-        self.ai_frequency_seconds = 15 * 60  # 15 minutes in seconds
-        
-        # Setup keyboard hotkeys using proper hotkey combinations
-        def toggle_trading():
-            self.trading_active = not self.trading_active
-            status = "STARTED" if self.trading_active else "STOPPED"
-            self.logger.info(f"Trading {status} by user")
-            
-        def toggle_mode():
-            # Toggle between testnet and live mode display (demo)
-            current = self.ui.current_mode
-            self.ui.current_mode = "LIVE" if current == "Testnet" else "Testnet"
-            self.logger.info(f"Display mode switched to {self.ui.current_mode}")
-            
-        def quit_bot():
-            self.is_running = False
-            self.logger.info("Shutdown requested by user")
-        
-        # Register hotkey combinations
-        keyboard.add_hotkey('shift+s', toggle_trading)
-        keyboard.add_hotkey('shift+m', toggle_mode)
-        keyboard.add_hotkey('shift+q', quit_bot)
-        
-        # Initialize balance refresh timer
-        last_balance_refresh = 0
-        balance_refresh_interval = 5  # 5 seconds
-        
-        # Main UI loop with enhanced real-time updates
-        with Live(self.ui.layout, refresh_per_second=2, screen=True) as live:
-            while self.is_running:
-                try:
-                    current_time = time.time()
-                    
-                    # Refresh balances every 5 seconds
-                    if current_time - last_balance_refresh >= balance_refresh_interval:
-                        last_balance_refresh = current_time
-                        # Force balance refresh
-                        self._cached_balances = None
-                    
-                    # Get updated bot data
-                    bot_data = self.get_bot_data()
-                    bot_data['trading_active'] = self.trading_active
-                    
-                    # Update UI display
-                    self.ui.update_display(bot_data, self.gamification)
-                    
-                    # Sleep for smoother updates
-                    await asyncio.sleep(0.5)
-                    
-                except KeyboardInterrupt:
-                    break
-                except Exception as e:
-                    self.logger.error(f"UI error: {e}")
-                    await asyncio.sleep(1)
-                    
-        await self.stop()
+    # run_with_ui method removed - bot now runs in automated mode only
         
     async def stop(self):
         """Stop the trading bot"""
@@ -1863,67 +1856,86 @@ class EnhancedTradingBot:
         self.logger.info(f"Total Profit: ${self.total_profit:.2f}")
         self.logger.info(f"Max Streak: {self.gamification.max_streak}")
         self.logger.info(f"Badges Earned: {len(self.gamification.badges)}")
+        
+    async def run_automated(self):
+        """Run bot in automated mode for Railway deployment"""
+        self.logger.info("Starting Kuvera Grid v1.1 in automated mode 🚀")
+        self.is_running = True
+        self.trading_active = True
+        
+        # Run diagnostic tests if enabled
+        if self.diagnostic_mode:
+            self.logger.info("🔍 Diagnostic mode enabled - Running connectivity tests...")
+            await self.test_openrouter_connectivity()
+        
+        # Execute startup test trade if enabled
+        if self.startup_test_enabled:
+            await self.execute_startup_test_trade()
+        
+        # Start WebSocket
+        await self.start_websocket()
+        
+        # Initialize AI analysis timer
+        self.last_ai_analysis = 0
+        self.ai_frequency_seconds = 15 * 60  # 15 minutes in seconds
+        
+        # Initialize balance refresh timer
+        last_balance_refresh = 0
+        balance_refresh_interval = 30  # 30 seconds for automated mode
+        last_status_log = 0
+        status_log_interval = 300  # Log status every 5 minutes
+        
+        # Main automated loop
+        while self.is_running:
+            try:
+                current_time = time.time()
+                
+                # Update balance periodically
+                if current_time - last_balance_refresh >= balance_refresh_interval:
+                    balances = self.get_account_balances()
+                    usdt_balance = balances.get('USDT', 0)
+                    last_balance_refresh = current_time
+                    
+                    # Log status periodically
+                    if current_time - last_status_log >= status_log_interval:
+                        self.logger.info(f"📊 Status - Balance: ${usdt_balance:.2f}, Profit: ${self.total_profit:.2f}, Trades: {self.trade_count}")
+                        last_status_log = current_time
+                
+                # AI analysis timer
+                if (self.ai_enabled and 
+                    current_time - self.last_ai_analysis >= self.ai_frequency_seconds):
+                    await self.run_ai_analysis()
+                    self.last_ai_analysis = current_time
+                
+                await asyncio.sleep(5)  # 5 second refresh rate for automated mode
+                
+            except Exception as e:
+                self.logger.error(f"Automated loop error: {e}")
+                await asyncio.sleep(10)  # Wait longer on error
+                
+        # Cleanup
+        await self.stop()
 
-def interactive_setup():
-    """Interactive setup for bot configuration"""
-    console = Console()
-    
-    console.print(Panel.fit(
-        "[bold cyan]Kuvera Grid Trading Bot v1.1 🚀[/bold cyan]\n"
-        "[dim]AI-powered cryptocurrency trading with modern interface[/dim]",
-        box=box.DOUBLE
-    ))
-    
-    console.print("\n[bold]📊 Trading Mode Selection:[/bold]")
-    console.print("1. [green]Testnet[/green] (Recommended for beginners) - Default")
-    console.print("2. [red]Live Trading[/red] (Real money - Use with caution!)")
-    
-    mode_choice = console.input("\nSelect mode (1/2) [Default: 1]: ").strip()
-    testnet_mode = True if mode_choice != '2' else False
-    
-    if not testnet_mode:
-        console.print("\n[bold red]⚠️  WARNING: You selected LIVE TRADING mode![/bold red]")
-        console.print("[bold red]⚠️  This will use real money. Are you absolutely sure?[/bold red]")
-        confirm = console.input("Type 'CONFIRM' to proceed with live trading: ")
-        if confirm != 'CONFIRM':
-            console.print("[yellow]Switching back to testnet mode for safety.[/yellow]")
-            testnet_mode = True
-    
-    console.print("\n[bold]🤖 AI Features:[/bold]")
-    console.print("1. [green]Enable AI[/green] (XGBoost, sentiment analysis) - Default")
-    console.print("2. [yellow]Disable AI[/yellow] (Basic mean reversion only)")
-    
-    ai_choice = console.input("\nSelect AI mode (1/2) [Default: 1]: ").strip()
-    ai_enabled = True if ai_choice != '2' else False
-    
-    console.print("\n[bold]📈 Strategy Selection:[/bold]")
-    console.print("1. [green]Mean Reversion[/green] (SMA + RSI + Bollinger Bands) - Default")
-    console.print("2. [blue]Grid Trading[/blue] (Coming soon)")
-    console.print("3. [purple]DCA Strategy[/purple] (Coming soon)")
-    
-    strategy_choice = console.input("\nSelect strategy (1/2/3) [Default: 1]: ").strip()
-    strategy_type = "mean_reversion"  # Default for now
-    
-    # Display configuration
-    config_table = Table(title="Configuration Summary", box=box.ROUNDED)
-    config_table.add_column("Setting", style="cyan")
-    config_table.add_column("Value", style="green")
-    
-    config_table.add_row("Trading Mode", "Testnet" if testnet_mode else "LIVE")
-    config_table.add_row("AI Features", "Enabled" if ai_enabled else "Disabled")
-    config_table.add_row("Strategy", "Mean Reversion Enhanced")
-    config_table.add_row("Risk per Trade", "1% of capital (max $0.30)")
-    config_table.add_row("Target", "$1-2 profit/week")
-    
-    console.print(config_table)
-    
-    return testnet_mode, ai_enabled, strategy_type
+# Interactive setup function removed - bot now runs in automated mode only
 
 async def main():
-    """Main execution function"""
+    """Main execution function - Always runs in automated mode"""
     try:
-        # Interactive setup
-        testnet_mode, ai_enabled, strategy_type = interactive_setup()
+        # Always use automated setup
+        testnet_mode = os.getenv('TRADING_MODE', 'testnet').lower() == 'testnet'
+        ai_enabled = os.getenv('AI_ENABLED', 'true').lower() == 'true'
+        strategy_type = os.getenv('STRATEGY_TYPE', 'mean_reversion')
+        
+        console = Console()
+        console.print(Panel.fit(
+            "[bold cyan]Kuvera Grid Trading Bot v1.1 🚀[/bold cyan]\n"
+            "[dim]Automated mode - No interactive UI[/dim]",
+            box=box.DOUBLE
+        ))
+        
+        console.print(f"[green]✓ Trading Mode: {'Testnet' if testnet_mode else 'LIVE'}[/green]")
+        console.print(f"[green]✓ AI Features: {'Enabled' if ai_enabled else 'Disabled'}[/green]")
+        console.print(f"[green]✓ Strategy: {strategy_type}[/green]")
         
         # Initialize bot
         bot = EnhancedTradingBot()
@@ -1932,14 +1944,12 @@ async def main():
         bot.ui.ai_enabled = ai_enabled
         bot.ui.strategy_type = "Mean Reversion Enhanced"
         
-        console = Console()
         console.print("\n[bold green]🔄 Starting bot...[/bold green]")
-        console.print("[dim]Press Shift+S to start/stop, Shift+M to change mode, Shift+Q to quit[/dim]")
-        console.print("[dim]Press Ctrl+C to exit at any time[/dim]")
+        console.print("[green]🤖 Starting automated trading...[/green]")
         
-        await asyncio.sleep(2)  # Brief pause before starting UI
-        
-        await bot.run_with_ui()
+        # Always start in automated mode
+        bot.trading_active = True
+        await bot.run_automated()
         
     except KeyboardInterrupt:
         console = Console()
