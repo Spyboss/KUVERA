@@ -281,9 +281,50 @@ def bot_control(action):
         elif action == 'restart':
             logging.info("Restarting trading bot...")
             bot_stats['status'] = 'restarting'
-            # Restart logic here
-            bot_stats['status'] = 'running'
-            return jsonify({'success': True, 'message': 'Bot restarted successfully'})
+            
+            try:
+                # Stop the current bot if running
+                if bot_instance:
+                    logging.info("Stopping existing bot instance...")
+                    try:
+                        bot_instance.is_running = False
+                        if hasattr(bot_instance, 'stop'):
+                            try:
+                                loop = asyncio.get_event_loop()
+                                loop.run_until_complete(bot_instance.stop())
+                            except RuntimeError:
+                                asyncio.run(bot_instance.stop())
+                    except Exception as e:
+                        logging.error(f"Error stopping bot: {e}")
+                    
+                    bot_instance = None
+                    logging.info("Bot instance stopped")
+                
+                # Wait a moment for cleanup
+                time.sleep(1)
+                
+                # Clear previous startup logs
+                bot_startup_logs.clear()
+                
+                # Start bot in background thread
+                bot_thread = Thread(target=run_bot_in_background, daemon=True)
+                bot_thread.start()
+                
+                bot_stats.update({
+                    'status': 'starting',
+                    'startup_stage': 'initializing',
+                    'startup_progress': 10,
+                    'error_message': None
+                })
+                
+                logging.info("Bot restart initiated successfully")
+                return jsonify({'success': True, 'message': 'Bot restart initiated successfully'})
+                
+            except Exception as e:
+                logging.error(f"Bot restart error: {e}")
+                bot_stats['status'] = 'error'
+                bot_stats['error_message'] = str(e)
+                return jsonify({'success': False, 'message': f'Bot restart failed: {str(e)}'})
         
         else:
             return jsonify({'success': False, 'message': 'Invalid action'}), 400

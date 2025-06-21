@@ -184,9 +184,15 @@
             color: white;
         }
         
-        .btn:hover {
+        .btn:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
         }
         
         .logs-container {
@@ -553,6 +559,9 @@
             setInterval(updateDashboard, 5000);
             setInterval(updateLogs, 2000);  // More frequent for live logs
             setInterval(updateTrades, 10000);
+            
+            // Initialize button states on page load
+            updateButtonStates('stopped'); // Default to stopped state
         });
         
         function setupLogControls() {
@@ -640,6 +649,9 @@
                     // Update status indicator
                     const indicator = document.getElementById('status-indicator');
                     indicator.className = `status-indicator status-${data.status}`;
+                    
+                    // Update button states based on bot status
+                    updateButtonStates(data.status);
                     
                     // Update financial metrics
                     document.getElementById('balance').textContent = `$${data.balance.toFixed(2)}`;
@@ -832,6 +844,38 @@
                     button.innerHTML = originalText;
                     button.disabled = false;
                 });
+        }
+        
+        function updateButtonStates(status) {
+            const startBtn = document.getElementById('start-btn');
+            const stopBtn = document.getElementById('stop-btn');
+            const restartBtn = document.getElementById('restart-btn');
+
+            // Reset all buttons to enabled state
+            startBtn.disabled = false;
+            stopBtn.disabled = false;
+            restartBtn.disabled = false;
+
+            // Update button states based on current status
+            switch(status) {
+                case 'stopped':
+                case 'error':
+                    stopBtn.disabled = true;
+                    restartBtn.disabled = true;
+                    break;
+                case 'running':
+                    startBtn.disabled = true;
+                    break;
+                case 'starting':
+                case 'restarting':
+                    startBtn.disabled = true;
+                    stopBtn.disabled = true;
+                    restartBtn.disabled = true;
+                    break;
+                default:
+                    // Keep all buttons enabled for unknown states
+                    break;
+            }
         }
         
         function showAlert(message, type) {
