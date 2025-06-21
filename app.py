@@ -64,7 +64,13 @@ class WebLogHandler(logging.Handler):
             recent_logs.pop(0)
         
         # Track startup logs separately
-        if bot_stats['status'] in ['starting', 'initializing']:
+        # Capture logs during initial app startup (first 30 seconds) or when bot is starting
+        current_time = datetime.now()
+        time_since_start = (current_time - start_time).total_seconds()
+        
+        if (bot_stats['status'] in ['starting', 'initializing'] or 
+            time_since_start < 30 or  # First 30 seconds of app startup
+            any(keyword in log_entry['message'].lower() for keyword in ['starting', 'dashboard', 'flask', 'serving'])):
             bot_startup_logs.append(log_entry)
             if len(bot_startup_logs) > 50:  # Keep last 50 startup logs
                 bot_startup_logs.pop(0)
