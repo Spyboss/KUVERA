@@ -400,37 +400,96 @@ class EnhancedTradingBot:
         return int(time.time() * 1000)
         
     def setup_logging(self):
-        """Setup logging configuration with UTF-8 encoding"""
+        """Setup enhanced logging configuration with UTF-8 encoding and specialized loggers"""
         os.makedirs('logs', exist_ok=True)
+        os.makedirs('logs/indicators', exist_ok=True)
+        os.makedirs('logs/strategies', exist_ok=True)
+        os.makedirs('logs/signals', exist_ok=True)
         
         log_level = getattr(logging, self.config['monitoring']['log_level'])
         
-        # Create file handler with UTF-8 encoding to handle Unicode characters like 🚀
-        file_handler = logging.FileHandler(
+        # Create main bot log handler
+        main_handler = logging.FileHandler(
             f'logs/bot_{datetime.now().strftime("%Y%m%d")}.log',
             encoding='utf-8'
         )
-        file_handler.setLevel(log_level)
+        main_handler.setLevel(log_level)
         
-        # Create console handler with UTF-8 encoding
+        # Create specialized log handlers
+        indicator_handler = logging.FileHandler(
+            f'logs/indicators/indicators_{datetime.now().strftime("%Y%m%d")}.log',
+            encoding='utf-8'
+        )
+        indicator_handler.setLevel(logging.DEBUG)
+        
+        strategy_handler = logging.FileHandler(
+            f'logs/strategies/strategy_performance_{datetime.now().strftime("%Y%m%d")}.log',
+            encoding='utf-8'
+        )
+        strategy_handler.setLevel(logging.INFO)
+        
+        signal_handler = logging.FileHandler(
+            f'logs/signals/signal_analysis_{datetime.now().strftime("%Y%m%d")}.log',
+            encoding='utf-8'
+        )
+        signal_handler.setLevel(logging.INFO)
+        
+        # Create console handler
         console_handler = logging.StreamHandler()
         console_handler.setLevel(log_level)
         
-        # Create formatter
-        formatter = logging.Formatter(
+        # Create formatters
+        detailed_formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
+        )
+        simple_formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
-        file_handler.setFormatter(formatter)
-        console_handler.setFormatter(formatter)
+        
+        # Set formatters
+        main_handler.setFormatter(simple_formatter)
+        indicator_handler.setFormatter(detailed_formatter)
+        strategy_handler.setFormatter(detailed_formatter)
+        signal_handler.setFormatter(detailed_formatter)
+        console_handler.setFormatter(simple_formatter)
         
         # Configure root logger
         logging.basicConfig(
             level=log_level,
-            handlers=[file_handler, console_handler]
+            handlers=[main_handler, console_handler]
         )
         
+        # Create specialized loggers
         self.logger = logging.getLogger('KuveraBot')
-        self.logger.info("Logging system initialized with UTF-8 encoding 🚀")
+        self.indicator_logger = logging.getLogger('Indicators')
+        self.strategy_logger = logging.getLogger('Strategy')
+        self.signal_logger = logging.getLogger('Signals')
+        
+        # Add handlers to specialized loggers
+        self.indicator_logger.addHandler(indicator_handler)
+        self.strategy_logger.addHandler(strategy_handler)
+        self.signal_logger.addHandler(signal_handler)
+        
+        # Prevent duplicate logging
+        self.indicator_logger.propagate = False
+        self.strategy_logger.propagate = False
+        self.signal_logger.propagate = False
+        
+        # Initialize strategy performance tracking
+        self.strategy_stats = {
+            'sri_bb_wf_strsi': {'wins': 0, 'losses': 0, 'total_profit': 0.0, 'trades': []},
+            'SRI_CRYPTO_BB_WF_STRSI_TD': {
+                'wins': 0, 'losses': 0, 'total_profit': 0.0, 'trades': [],
+                'signals_generated': 0, 'signals_taken': 0, 'avg_signal_strength': 0.0,
+                'td_setups_detected': 0, 'td_perfect_signals': 0, 'td_countdown_signals': 0
+            },
+            'ai_ensemble': {'wins': 0, 'losses': 0, 'total_profit': 0.0, 'trades': []},
+            'mean_reversion': {'wins': 0, 'losses': 0, 'total_profit': 0.0, 'trades': []},
+            'overall': {'wins': 0, 'losses': 0, 'total_profit': 0.0, 'trades': []}
+        }
+        
+        self.logger.info("Enhanced logging system initialized with UTF-8 encoding 🚀")
+        self.logger.info("📊 Specialized loggers: Indicators, Strategy Performance, Signal Analysis")
         
     def setup_binance_client(self):
         """Setup Binance API client with improved timestamp synchronization"""
@@ -861,8 +920,9 @@ class EnhancedTradingBot:
             return {'bullish_divergence': False, 'bearish_divergence': False}
     
     def calculate_technical_indicators(self, prices: List[float], timeframe: str = '5m', high_prices: List[float] = None, low_prices: List[float] = None) -> Dict[str, float]:
-        """Calculate enhanced technical indicators with multi-timeframe support"""
+        """Calculate enhanced technical indicators with Sri Crypto strategies integration and detailed logging"""
         if len(prices) < 20 or not talib:
+            self.indicator_logger.warning(f"Insufficient data for {timeframe}: {len(prices)} bars < 20 or TA-Lib not available")
             return {}
             
         prices_array = np.array(prices, dtype=float)
@@ -885,6 +945,9 @@ class EnhancedTradingBot:
                 entry_threshold, exit_threshold = self.calculate_dynamic_thresholds(atr_value, current_price)
                 indicators['dynamic_entry_threshold'] = entry_threshold
                 indicators['dynamic_exit_threshold'] = exit_threshold
+                
+                # Sri Crypto: Williams Fractals calculation
+                indicators.update(self.calculate_williams_fractals(high_prices, low_prices, periods=2))
             else:
                 # Use default values if OHLC data not available
                 dynamic_sma_period = 12
@@ -892,6 +955,8 @@ class EnhancedTradingBot:
                 indicators['dynamic_sma_period'] = dynamic_sma_period
                 indicators['dynamic_entry_threshold'] = 0.003
                 indicators['dynamic_exit_threshold'] = 0.0175
+                indicators['up_fractal'] = False
+                indicators['down_fractal'] = False
             
             # Dynamic SMA
             if len(prices) >= dynamic_sma_period:
@@ -908,6 +973,140 @@ class EnhancedTradingBot:
             indicators['bb_upper'] = bb_upper[-1]
             indicators['bb_middle'] = bb_middle[-1]
             indicators['bb_lower'] = bb_lower[-1]
+            
+            # Sri Crypto: Stochastic RSI calculation
+            indicators.update(self.calculate_stochastic_rsi(prices_array))
+            
+            # Sri Crypto: Multi-timeframe EMAs (8, 13, 21, 34, 55, 100, 200)
+            ema_periods = [8, 13, 21, 34, 55, 100, 200]
+            for period in ema_periods:
+                if len(prices) >= period:
+                    ema = talib.EMA(prices_array, timeperiod=period)[-1]
+                    indicators[f'ema_{period}'] = ema
+            
+            # Sri Crypto: Multi-timeframe SMAs (10, 20, 30, 50, 100, 200)
+            sma_periods = [10, 20, 30, 50, 100, 200]
+            for period in sma_periods:
+                if len(prices) >= period:
+                    sma_val = talib.SMA(prices_array, timeperiod=period)[-1]
+                    indicators[f'sma_{period}'] = sma_val
+            
+            # Sri Crypto: DEMA calculation
+            if len(prices) >= 21:
+                dema = talib.DEMA(prices_array, timeperiod=21)[-1]
+                indicators['dema'] = dema
+            
+            # === DETAILED INDICATOR LOGGING ===
+            self.indicator_logger.info(f"📊 {timeframe.upper()} TECHNICAL ANALYSIS - Price: ${current_price:.4f}")
+            
+            # Bollinger Bands Analysis
+            bb_position = "MIDDLE"
+            bb_squeeze = abs(indicators['bb_upper'] - indicators['bb_lower']) / indicators['bb_middle']
+            if current_price <= indicators['bb_lower']:
+                bb_position = "BELOW_LOWER"
+            elif current_price >= indicators['bb_upper']:
+                bb_position = "ABOVE_UPPER"
+            elif current_price < indicators['bb_middle']:
+                bb_position = "LOWER_HALF"
+            else:
+                bb_position = "UPPER_HALF"
+            
+            self.indicator_logger.info(
+                f"📊 BB(20,{bb_multiplier}): Upper=${indicators['bb_upper']:.4f}, "
+                f"Middle=${indicators['bb_middle']:.4f}, Lower=${indicators['bb_lower']:.4f}, "
+                f"Position={bb_position}, Squeeze={bb_squeeze:.4f}"
+            )
+            
+            # RSI Analysis
+            rsi_condition = "NEUTRAL"
+            if indicators['rsi'] >= 70:
+                rsi_condition = "OVERBOUGHT"
+            elif indicators['rsi'] <= 30:
+                rsi_condition = "OVERSOLD"
+            elif indicators['rsi'] >= 60:
+                rsi_condition = "BULLISH"
+            elif indicators['rsi'] <= 40:
+                rsi_condition = "BEARISH"
+            
+            self.indicator_logger.info(f"📊 RSI(14): {indicators['rsi']:.2f} - {rsi_condition}")
+            
+            # Stochastic RSI Analysis
+            if 'stoch_rsi_k' in indicators and 'stoch_rsi_d' in indicators:
+                strsi_condition = "NEUTRAL"
+                if indicators['stoch_rsi_k'] >= 80:
+                    strsi_condition = "OVERBOUGHT"
+                elif indicators['stoch_rsi_k'] <= 20:
+                    strsi_condition = "OVERSOLD"
+                
+                self.indicator_logger.info(
+                    f"📊 STOCH_RSI: %K={indicators['stoch_rsi_k']:.2f}, "
+                    f"%D={indicators['stoch_rsi_d']:.2f} - {strsi_condition}"
+                )
+            
+            # Fractals Analysis
+            fractal_signal = "NONE"
+            if indicators['up_fractal']:
+                fractal_signal = "UP_FRACTAL"
+            elif indicators['down_fractal']:
+                fractal_signal = "DOWN_FRACTAL"
+            
+            self.indicator_logger.info(
+                f"📊 FRACTALS: Up={indicators['up_fractal']}, "
+                f"Down={indicators['down_fractal']} - Signal: {fractal_signal}"
+            )
+            
+            # DEMA vs Price Analysis
+            if 'dema' in indicators:
+                dema_trend = "BULLISH" if current_price > indicators['dema'] else "BEARISH"
+                dema_distance = ((current_price - indicators['dema']) / indicators['dema']) * 100
+                self.indicator_logger.info(
+                    f"📊 DEMA(21): {indicators['dema']:.4f}, "
+                    f"Price vs DEMA: {dema_trend} ({dema_distance:+.2f}%)"
+                )
+            
+            # ATR and Volatility Analysis
+            volatility_level = "LOW"
+            atr_percentage = (indicators['atr'] / current_price) * 100
+            if atr_percentage > 2.0:
+                volatility_level = "HIGH"
+            elif atr_percentage > 1.0:
+                volatility_level = "MEDIUM"
+            
+            self.indicator_logger.info(
+                f"📊 VOLATILITY: ATR={indicators['atr']:.4f} ({atr_percentage:.2f}%), "
+                f"Level={volatility_level}, Dynamic_SMA_Period={dynamic_sma_period}"
+            )
+            
+            # Multi-timeframe EMA Trend Analysis
+            if 'ema_21' in indicators and 'ema_55' in indicators:
+                ema_trend = "BULLISH" if indicators['ema_21'] > indicators['ema_55'] else "BEARISH"
+                ema_separation = ((indicators['ema_21'] - indicators['ema_55']) / indicators['ema_55']) * 100
+                self.indicator_logger.info(
+                    f"📊 EMA_TREND: EMA21={indicators['ema_21']:.4f}, "
+                    f"EMA55={indicators['ema_55']:.4f} - {ema_trend} ({ema_separation:+.2f}%)"
+                )
+            
+            # Price vs Key EMAs
+            key_emas = [8, 13, 21, 34, 55]
+            ema_positions = []
+            for period in key_emas:
+                if f'ema_{period}' in indicators:
+                    position = "ABOVE" if current_price > indicators[f'ema_{period}'] else "BELOW"
+                    ema_positions.append(f"EMA{period}:{position}")
+            
+            if ema_positions:
+                self.indicator_logger.info(f"📊 EMA_POSITIONS: {', '.join(ema_positions)}")
+            
+            # Price vs Key SMAs
+            key_smas = [10, 20, 50, 100, 200]
+            sma_positions = []
+            for period in key_smas:
+                if f'sma_{period}' in indicators:
+                    position = "ABOVE" if current_price > indicators[f'sma_{period}'] else "BELOW"
+                    sma_positions.append(f"SMA{period}:{position}")
+            
+            if sma_positions:
+                self.indicator_logger.info(f"📊 SMA_POSITIONS: {', '.join(sma_positions)}")
             
             # Multi-timeframe specific indicators
             if timeframe == '1h':
@@ -940,6 +1139,23 @@ class EnhancedTradingBot:
                     divergence = self.detect_rsi_divergence(prices[-20:], rsi_values_clean[-20:])
                     indicators.update(divergence)
             
+            # Sri Crypto: TD Sequential calculation
+            if high_prices and low_prices and len(high_prices) == len(prices) and len(prices) >= 13:
+                highs_array = np.array(high_prices, dtype=float)
+                lows_array = np.array(low_prices, dtype=float)
+                td_sequential = self.calculate_td_sequential(prices_array, highs_array, lows_array)
+                indicators.update(td_sequential)
+                
+                # TD Sequential Analysis Logging
+                if td_sequential['setup_buy'] or td_sequential['setup_sell']:
+                    setup_type = "BUY" if td_sequential['setup_buy'] else "SELL"
+                    self.indicator_logger.info(
+                        f"📊 TD_SEQUENTIAL: {setup_type} Setup Complete! "
+                        f"Countdown: {td_sequential['countdown']}, "
+                        f"Perfect Signal: {td_sequential['perfect_signal']}, "
+                        f"Risk Level: ${td_sequential['td_risk_level']:.4f}"
+                    )
+            
             # Cache indicators for this timeframe
             self.indicators_cache[timeframe] = indicators
             
@@ -947,6 +1163,218 @@ class EnhancedTradingBot:
             self.logger.error(f"Error calculating indicators for {timeframe}: {e}")
             
         return indicators
+    
+    def calculate_williams_fractals(self, high_prices: List[float], low_prices: List[float], periods: int = 2) -> Dict[str, bool]:
+        """Calculate Williams Fractals for Sri Crypto strategy"""
+        try:
+            if len(high_prices) < (periods * 2 + 1) or len(low_prices) < (periods * 2 + 1):
+                return {'up_fractal': False, 'down_fractal': False}
+            
+            # Check for Up Fractal (high point)
+            current_high = high_prices[-periods-1]
+            up_fractal = True
+            
+            # Check if current high is higher than surrounding highs
+            for i in range(periods):
+                if (high_prices[-periods-1-i-1] >= current_high or 
+                    high_prices[-periods+i] >= current_high):
+                    up_fractal = False
+                    break
+            
+            # Check for Down Fractal (low point)
+            current_low = low_prices[-periods-1]
+            down_fractal = True
+            
+            # Check if current low is lower than surrounding lows
+            for i in range(periods):
+                if (low_prices[-periods-1-i-1] <= current_low or 
+                    low_prices[-periods+i] <= current_low):
+                    down_fractal = False
+                    break
+            
+            return {
+                'up_fractal': up_fractal,
+                'down_fractal': down_fractal
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating Williams Fractals: {e}")
+            return {'up_fractal': False, 'down_fractal': False}
+    
+    def calculate_stochastic_rsi(self, prices_array: np.ndarray, rsi_period: int = 14, stoch_period: int = 14, k_smooth: int = 3, d_smooth: int = 3) -> Dict[str, float]:
+        """Calculate Stochastic RSI for Sri Crypto strategy"""
+        try:
+            if len(prices_array) < max(rsi_period, stoch_period) + k_smooth + d_smooth:
+                return {'stoch_rsi_k': 50.0, 'stoch_rsi_d': 50.0}
+            
+            # Calculate RSI first
+            rsi_values = talib.RSI(prices_array, timeperiod=rsi_period)
+            
+            # Remove NaN values
+            rsi_clean = rsi_values[~np.isnan(rsi_values)]
+            
+            if len(rsi_clean) < stoch_period:
+                return {'stoch_rsi_k': 50.0, 'stoch_rsi_d': 50.0}
+            
+            # Calculate Stochastic of RSI
+            stoch_rsi_values = []
+            for i in range(stoch_period - 1, len(rsi_clean)):
+                rsi_window = rsi_clean[i - stoch_period + 1:i + 1]
+                rsi_min = np.min(rsi_window)
+                rsi_max = np.max(rsi_window)
+                
+                if rsi_max - rsi_min == 0:
+                    stoch_rsi = 0
+                else:
+                    stoch_rsi = (rsi_clean[i] - rsi_min) / (rsi_max - rsi_min) * 100
+                
+                stoch_rsi_values.append(stoch_rsi)
+            
+            if len(stoch_rsi_values) < k_smooth:
+                return {'stoch_rsi_k': 50.0, 'stoch_rsi_d': 50.0}
+            
+            # Smooth %K
+            stoch_rsi_array = np.array(stoch_rsi_values)
+            k_values = talib.SMA(stoch_rsi_array, timeperiod=k_smooth)
+            
+            # Smooth %D
+            if len(k_values[~np.isnan(k_values)]) >= d_smooth:
+                d_values = talib.SMA(k_values, timeperiod=d_smooth)
+                stoch_rsi_k = k_values[-1] if not np.isnan(k_values[-1]) else 50.0
+                stoch_rsi_d = d_values[-1] if not np.isnan(d_values[-1]) else 50.0
+            else:
+                stoch_rsi_k = k_values[-1] if len(k_values) > 0 and not np.isnan(k_values[-1]) else 50.0
+                stoch_rsi_d = stoch_rsi_k
+            
+            return {
+                'stoch_rsi_k': float(stoch_rsi_k),
+                'stoch_rsi_d': float(stoch_rsi_d)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating Stochastic RSI: {e}")
+            return {'stoch_rsi_k': 50.0, 'stoch_rsi_d': 50.0}
+    
+    def calculate_td_sequential(self, closes: np.ndarray, highs: np.ndarray, lows: np.ndarray) -> Dict[str, any]:
+        """Calculate TD Sequential Setup and Countdown - Sri Crypto Strategy Component"""
+        try:
+            length = len(closes)
+            if length < 13:
+                return {'setup_buy': False, 'setup_sell': False, 'countdown': 0, 'perfect_signal': False}
+            
+            # TD Setup Logic
+            setup_buy_count = 0
+            setup_sell_count = 0
+            setup_buy_signal = False
+            setup_sell_signal = False
+            
+            # TD Countdown Logic
+            countdown_buy = 0
+            countdown_sell = 0
+            perfect_countdown = False
+            
+            # Calculate TD Setup (9 consecutive bars)
+            for i in range(4, length):
+                # Buy Setup: Close < Close[4] for 9 consecutive bars
+                if closes[i] < closes[i-4]:
+                    setup_buy_count += 1
+                    setup_sell_count = 0
+                else:
+                    setup_buy_count = 0
+                
+                # Sell Setup: Close > Close[4] for 9 consecutive bars
+                if closes[i] > closes[i-4]:
+                    setup_sell_count += 1
+                    setup_buy_count = 0
+                else:
+                    setup_sell_count = 0
+                
+                # Check for completed setups
+                if setup_buy_count >= 9:
+                    setup_buy_signal = True
+                    # Start countdown after setup completion
+                    countdown_buy = self._calculate_td_countdown(closes, highs, lows, i, 'buy')
+                
+                if setup_sell_count >= 9:
+                    setup_sell_signal = True
+                    # Start countdown after setup completion
+                    countdown_sell = self._calculate_td_countdown(closes, highs, lows, i, 'sell')
+            
+            # Perfect 13 signal (Sri Crypto specific)
+            if countdown_buy >= 13 or countdown_sell >= 13:
+                perfect_countdown = True
+            
+            # TD Risk calculation (based on setup bars)
+            td_risk_level = self._calculate_td_risk(closes, highs, lows, setup_buy_signal, setup_sell_signal)
+            
+            self.indicators_logger.info(
+                f"📊 TD SEQUENTIAL - Setup Buy: {setup_buy_signal} ({setup_buy_count}), "
+                f"Setup Sell: {setup_sell_signal} ({setup_sell_count}), "
+                f"Countdown: {max(countdown_buy, countdown_sell)}, Perfect: {perfect_countdown}"
+            )
+            
+            return {
+                'setup_buy': setup_buy_signal,
+                'setup_sell': setup_sell_signal,
+                'setup_buy_count': setup_buy_count,
+                'setup_sell_count': setup_sell_count,
+                'countdown_buy': countdown_buy,
+                'countdown_sell': countdown_sell,
+                'countdown': max(countdown_buy, countdown_sell),
+                'perfect_signal': perfect_countdown,
+                'td_risk_level': td_risk_level
+            }
+            
+        except Exception as e:
+            self.logger.error(f"TD Sequential calculation error: {e}")
+            return {'setup_buy': False, 'setup_sell': False, 'countdown': 0, 'perfect_signal': False}
+    
+    def _calculate_td_countdown(self, closes: np.ndarray, highs: np.ndarray, lows: np.ndarray, 
+                               start_idx: int, direction: str) -> int:
+        """Calculate TD Countdown after setup completion"""
+        try:
+            countdown = 0
+            length = len(closes)
+            
+            for i in range(start_idx + 1, min(start_idx + 14, length)):
+                if direction == 'buy':
+                    # Buy countdown: Close <= Low[2]
+                    if i >= 2 and closes[i] <= lows[i-2]:
+                        countdown += 1
+                elif direction == 'sell':
+                    # Sell countdown: Close >= High[2]
+                    if i >= 2 and closes[i] >= highs[i-2]:
+                        countdown += 1
+            
+            return countdown
+            
+        except Exception as e:
+            self.logger.error(f"TD Countdown calculation error: {e}")
+            return 0
+    
+    def _calculate_td_risk(self, closes: np.ndarray, highs: np.ndarray, lows: np.ndarray, 
+                          setup_buy: bool, setup_sell: bool) -> float:
+        """Calculate TD Risk levels based on setup bars"""
+        try:
+            if len(closes) < 9:
+                return 0.0
+            
+            if setup_buy:
+                # TD Buy Risk: Lowest low of setup bars
+                setup_lows = lows[-9:]
+                td_risk = np.min(setup_lows)
+            elif setup_sell:
+                # TD Sell Risk: Highest high of setup bars
+                setup_highs = highs[-9:]
+                td_risk = np.max(setup_highs)
+            else:
+                td_risk = closes[-1]  # Current price as default
+            
+            return float(td_risk)
+            
+        except Exception as e:
+            self.logger.error(f"TD Risk calculation error: {e}")
+            return 0.0
         
     def get_account_balances(self, force_refresh: bool = False) -> Dict[str, float]:
         """Get account balances with caching for real-time updates"""
@@ -996,6 +1424,9 @@ class EnhancedTradingBot:
         except:
             api_status = "ERROR"
         
+        # Get TD Sequential strategy statistics
+        td_strategy_stats = self.strategy_stats.get('SRI_CRYPTO_BB_WF_STRSI_TD', {})
+        
         return {
             'trades': self.trade_count,
             'win_rate': win_rate,
@@ -1007,7 +1438,15 @@ class EnhancedTradingBot:
             'api_status': api_status,
             'target_progress': target_progress,
             'current_price': self.current_price,
-            'ai_sentiment': self.ai_sentiment_score if self.ai_enabled else None
+            'ai_sentiment': self.ai_sentiment_score if self.ai_enabled else None,
+            'td_sequential_stats': {
+                'setups_detected': td_strategy_stats.get('td_setups_detected', 0),
+                'perfect_signals': td_strategy_stats.get('td_perfect_signals', 0),
+                'countdown_signals': td_strategy_stats.get('td_countdown_signals', 0),
+                'signals_generated': td_strategy_stats.get('signals_generated', 0),
+                'signals_taken': td_strategy_stats.get('signals_taken', 0),
+                'avg_signal_strength': td_strategy_stats.get('avg_signal_strength', 0.0)
+            }
         }
         
     async def get_multi_timeframe_signals(self, current_price: float) -> Dict[str, bool]:
@@ -1123,8 +1562,9 @@ class EnhancedTradingBot:
             return True, 0.5
     
     async def should_buy_enhanced(self, current_price: float, indicators: Dict[str, float]) -> bool:
-        """Enhanced buy logic with multi-timeframe analysis and AI ensemble filtering"""
+        """Enhanced buy logic with Sri Crypto BB + WF + STRSI strategy integration"""
         if self.position or not indicators:
+            self.logger.debug(f"❌ Buy blocked - Position: {bool(self.position)}, Indicators: {bool(indicators)}")
             return False
             
         # Check cooldown and daily limits
@@ -1132,37 +1572,119 @@ class EnhancedTradingBot:
             cooldown = self.config['risk']['cooldown_period']
             time_since_last = (datetime.now() - self.last_trade_time).total_seconds()
             if time_since_last < cooldown:
+                self.logger.debug(f"❌ Buy blocked - Cooldown: {time_since_last:.0f}s < {cooldown}s")
                 return False
                 
         if self.daily_trades >= self.config['risk']['max_daily_trades']:
+            self.logger.debug(f"❌ Buy blocked - Daily trades: {self.daily_trades}/{self.config['risk']['max_daily_trades']}")
             return False
             
         if self.daily_loss >= self.config['risk']['max_daily_loss']:
+            self.logger.debug(f"❌ Buy blocked - Daily loss: {self.daily_loss:.4f}/{self.config['risk']['max_daily_loss']}")
             return False
-            
-        # Get dynamic thresholds from indicators
-        sma = indicators.get('sma')
-        rsi = indicators.get('rsi')
+        
+        # Sri Crypto Strategy: BB + WF + STRSI Integration
+        bb_upper = indicators.get('bb_upper')
         bb_lower = indicators.get('bb_lower')
-        entry_threshold = indicators.get('dynamic_entry_threshold', 0.003)
+        bb_middle = indicators.get('bb_middle')
+        stoch_rsi_k = indicators.get('stoch_rsi_k', 50)
+        up_fractal = indicators.get('up_fractal', False)
+        down_fractal = indicators.get('down_fractal', False)
+        rsi = indicators.get('rsi')
+        dema = indicators.get('dema')
         
-        if not sma:
+        # Enhanced logging for all indicator values
+        self.logger.info(f"📊 INDICATORS - Price: ${current_price:.4f}, BB_Lower: {bb_lower:.4f}, BB_Upper: {bb_upper:.4f}")
+        self.logger.info(f"📊 INDICATORS - STRSI_K: {stoch_rsi_k:.2f}, RSI: {rsi:.2f}, DEMA: {dema:.4f if dema else 'N/A'}")
+        self.logger.info(f"📊 FRACTALS - Up: {up_fractal}, Down: {down_fractal}")
+        
+        if not all([bb_upper, bb_lower, bb_middle]):
+            self.logger.warning("❌ Missing Bollinger Bands data")
             return False
             
-        # Enhanced signal conditions with dynamic thresholds
-        conditions = []
+        # Sri Crypto Strategy Conditions
+        sri_conditions = []
+        condition_details = []
         
-        # Price below dynamic SMA threshold
-        buy_threshold = sma * (1 - entry_threshold)
-        conditions.append(current_price <= buy_threshold)
+        # Condition 1: Price below Bollinger Band Lower (Sri Crypto BB Strategy)
+        bb_condition = current_price < bb_lower
+        sri_conditions.append(bb_condition)
+        condition_details.append(f"BB_Lower: {bb_condition} (${current_price:.4f} < ${bb_lower:.4f})")
         
-        # RSI oversold (more selective)
-        if rsi:
-            conditions.append(rsi < 35)  # Slightly more selective
+        # Condition 2: Stochastic RSI oversold (K < 30)
+        strsi_condition = stoch_rsi_k < 30
+        sri_conditions.append(strsi_condition)
+        condition_details.append(f"STRSI_Oversold: {strsi_condition} ({stoch_rsi_k:.2f} < 30)")
+        
+        # Condition 3: Williams Fractal confirmation (Down Fractal indicates potential reversal)
+        fractal_condition = down_fractal
+        sri_conditions.append(fractal_condition)
+        condition_details.append(f"Down_Fractal: {fractal_condition}")
+        
+        # Additional Sri Crypto conditions from the indicator analysis
+        # Condition 4: Price below DEMA (if available)
+        dema_condition = True
+        if dema:
+            dema_condition = current_price < dema
+            sri_conditions.append(dema_condition)
+            condition_details.append(f"Below_DEMA: {dema_condition} (${current_price:.4f} < ${dema:.4f})")
+        
+        # Condition 5: RSI oversold confirmation
+        rsi_condition = rsi < 35 if rsi else True
+        sri_conditions.append(rsi_condition)
+        condition_details.append(f"RSI_Oversold: {rsi_condition} ({rsi:.2f} < 35)")
+        
+        # Condition 6: TD Sequential Buy Setup (Sri Crypto TD Strategy)
+        td_setup_buy = indicators.get('setup_buy', False)
+        td_countdown = indicators.get('countdown', 0)
+        td_perfect_signal = indicators.get('perfect_signal', False)
+        
+        # TD Sequential conditions
+        td_setup_condition = td_setup_buy
+        td_countdown_condition = td_countdown >= 8  # Near completion
+        td_perfect_condition = td_perfect_signal
+        
+        sri_conditions.append(td_setup_condition)
+        condition_details.append(f"TD_Setup_Buy: {td_setup_condition}")
+        
+        if td_countdown > 0:
+            sri_conditions.append(td_countdown_condition)
+            condition_details.append(f"TD_Countdown: {td_countdown_condition} ({td_countdown}/13)")
+        
+        if td_perfect_signal:
+            sri_conditions.append(td_perfect_condition)
+            condition_details.append(f"TD_Perfect_Signal: {td_perfect_condition}")
+        
+        # Log all condition details
+        for detail in condition_details:
+            self.logger.info(f"🔍 CONDITION - {detail}")
+        
+        # Sri Crypto Signal Strength Calculation
+        sri_signal_strength = sum(sri_conditions) / len(sri_conditions)
+        required_strength = 0.6  # At least 60% of conditions must be met
+        
+        self.logger.info(f"⚡ SRI SIGNAL STRENGTH: {sri_signal_strength:.2f} ({sum(sri_conditions)}/{len(sri_conditions)} conditions met)")
+        
+        # TD Sequential specific logging
+        if td_setup_buy or td_countdown > 0:
+            self.logger.info(
+                f"📊 TD_SEQUENTIAL_BUY - Setup: {td_setup_buy}, Countdown: {td_countdown}/13, "
+                f"Perfect: {td_perfect_signal}, Risk: ${indicators.get('td_risk_level', 0):.4f}"
+            )
+        
+        # Traditional enhanced conditions (fallback)
+        sma = indicators.get('sma')
+        entry_threshold = indicators.get('dynamic_entry_threshold', 0.003)
+        traditional_conditions = []
+        
+        if sma:
+            # Price below dynamic SMA threshold
+            buy_threshold = sma * (1 - entry_threshold)
+            traditional_conditions.append(current_price <= buy_threshold)
             
-        # Price near enhanced Bollinger Band lower
-        if bb_lower:
-            conditions.append(current_price <= bb_lower * 1.005)  # Tighter threshold
+            # Price near enhanced Bollinger Band lower
+            if bb_lower:
+                traditional_conditions.append(current_price <= bb_lower * 1.005)  # Tighter threshold
         
         # Multi-timeframe analysis
         multi_tf_signals = await self.get_multi_timeframe_signals(current_price)
@@ -1200,27 +1722,114 @@ class EnhancedTradingBot:
                 except Exception as e:
                     self.logger.error(f"AI sentiment analysis error: {e}")
         
-        # Combine all signals
-        technical_conditions_met = sum(conditions) >= 2
+        # Combine all signals with enhanced Sri Crypto strategy logic
+        sri_signal_met = sri_signal_strength >= required_strength
+        traditional_conditions_met = sum(traditional_conditions) >= 1 if traditional_conditions else False
+        
+        # Strategy Performance Tracking
+        strategy_name = "SRI_CRYPTO_BB_WF_STRSI_TD"
+        if strategy_name not in self.strategy_stats:
+            self.strategy_stats[strategy_name] = {
+                'signals_generated': 0,
+                'signals_taken': 0,
+                'wins': 0,
+                'losses': 0,
+                'total_profit': 0.0,
+                'avg_signal_strength': 0.0,
+                'td_setups_detected': 0,
+                'td_perfect_signals': 0,
+                'td_countdown_signals': 0
+            }
+        
+        # Track TD Sequential specific metrics
+        if td_setup_buy:
+            self.strategy_stats[strategy_name]['td_setups_detected'] += 1
+        if td_perfect_signal:
+            self.strategy_stats[strategy_name]['td_perfect_signals'] += 1
+        if td_countdown >= 8:
+            self.strategy_stats[strategy_name]['td_countdown_signals'] += 1
+        
+        self.strategy_stats[strategy_name]['signals_generated'] += 1
+        self.strategy_stats[strategy_name]['avg_signal_strength'] = (
+            (self.strategy_stats[strategy_name]['avg_signal_strength'] * 
+             (self.strategy_stats[strategy_name]['signals_generated'] - 1) + sri_signal_strength) /
+            self.strategy_stats[strategy_name]['signals_generated']
+        )
+        
+        # Enhanced Strategy Logging
+        self.strategy_logger.info(
+            f"📈 {strategy_name} ANALYSIS - Signal Strength: {sri_signal_strength:.2f}, "
+            f"Required: {required_strength:.2f}, Met: {sri_signal_met}"
+        )
+        
+        self.strategy_logger.info(
+            f"📊 MULTI-TIMEFRAME - 1H: {multi_tf_signals.get('trend_1h_bullish', False)}, "
+            f"15M: {multi_tf_signals.get('setup_15m_bullish', False)}, "
+            f"5M: {multi_tf_signals.get('momentum_5m_bullish', False)}"
+        )
+        
+        # Signal Confidence Calculation
+        signal_components = {
+            'sri_crypto_strength': sri_signal_strength,
+            'multi_timeframe': 1.0 if timeframe_bullish else 0.0,
+            'ai_ensemble': ai_ensemble_confidence if ai_ensemble_signal else 0.0,
+            'ai_sentiment': self.ai_sentiment_score if ai_sentiment_signal else 0.0
+        }
+        
+        overall_confidence = sum(signal_components.values()) / len(signal_components)
+        
+        self.signals_logger.info(
+            f"🎯 SIGNAL CONFIDENCE BREAKDOWN - Overall: {overall_confidence:.2f}"
+        )
+        for component, value in signal_components.items():
+            self.signals_logger.info(f"   • {component.upper()}: {value:.2f}")
         
         # Final decision with enhanced logic
         if self.config['trading']['enhanced_features'].get('ai_ensemble', False):
+            # Use Sri Crypto strategy as primary signal with AI confirmation
             final_signal = (
-                technical_conditions_met and 
+                sri_signal_met and 
                 timeframe_bullish and 
                 ai_ensemble_signal and 
-                ai_sentiment_signal
+                ai_sentiment_signal and
+                overall_confidence >= 0.65  # Require 65% overall confidence
             )
             
             if final_signal:
-                self.logger.info(
-                    f"🎯 ENHANCED BUY SIGNAL - Technical: ✓, Multi-TF: ✓, "
-                    f"AI Ensemble: ✓ ({ai_ensemble_confidence:.2f}), Sentiment: ✓ ({self.ai_sentiment_score:.2f})"
+                self.strategy_stats[strategy_name]['signals_taken'] += 1
+                self.strategy_logger.info(
+                    f"🎯 SRI CRYPTO BUY SIGNAL CONFIRMED - Strength: {sri_signal_strength:.2f}, "
+                    f"Confidence: {overall_confidence:.2f}, Multi-TF: ✓, AI: ✓"
+                )
+                self.signals_logger.info(
+                    f"🚀 TRADE SIGNAL GENERATED - Strategy: {strategy_name}, "
+                    f"Price: ${current_price:.4f}, Confidence: {overall_confidence:.2f}"
                 )
         else:
-            # Fallback to simpler logic if enhanced features disabled
-            final_signal = technical_conditions_met and timeframe_bullish
+            # Fallback to Sri Crypto strategy with traditional confirmation
+            final_signal = (
+                sri_signal_met and 
+                timeframe_bullish and
+                overall_confidence >= 0.60  # Lower threshold without AI
+            )
             
+            if final_signal:
+                self.strategy_stats[strategy_name]['signals_taken'] += 1
+                self.strategy_logger.info(
+                    f"🎯 SRI CRYPTO BUY SIGNAL (Traditional) - Strength: {sri_signal_strength:.2f}, "
+                    f"Confidence: {overall_confidence:.2f}, Multi-TF: ✓"
+                )
+        
+        # Log strategy performance stats
+        stats = self.strategy_stats[strategy_name]
+        signal_efficiency = (stats['signals_taken'] / stats['signals_generated']) * 100 if stats['signals_generated'] > 0 else 0
+        
+        self.strategy_logger.info(
+            f"📊 {strategy_name} PERFORMANCE - Signals: {stats['signals_generated']}, "
+            f"Taken: {stats['signals_taken']} ({signal_efficiency:.1f}%), "
+            f"Avg Strength: {stats['avg_signal_strength']:.2f}"
+        )
+        
         return final_signal
         
     def handle_kline_data(self, ws_client, message):
@@ -1362,15 +1971,22 @@ class EnhancedTradingBot:
             self.logger.error(f"Error updating Grok AI trailing stop: {e}")
             
     async def should_sell_enhanced(self, current_price: float, indicators: Dict[str, float]) -> Tuple[bool, str]:
-        """Enhanced sell logic with dynamic thresholds, trailing stops, and time exits"""
+        """Enhanced sell logic with Sri Crypto strategy integration and comprehensive logging"""
         if not self.position or not self.entry_price:
             return False, ""
             
+        # Sri Crypto Indicators
         sma = indicators.get('sma')
         rsi = indicators.get('rsi')
         bb_upper = indicators.get('bb_upper')
+        bb_lower = indicators.get('bb_lower')
+        stoch_rsi_k = indicators.get('stoch_rsi_k')
+        stoch_rsi_d = indicators.get('stoch_rsi_d')
+        dema = indicators.get('dema')
         atr_value = indicators.get('atr', 0.01)
         exit_threshold = indicators.get('dynamic_exit_threshold', 0.0175)
+        up_fractal = indicators.get('up_fractal', False)
+        down_fractal = indicators.get('down_fractal', False)
         
         if not sma:
             return False, ""
@@ -1381,9 +1997,148 @@ class EnhancedTradingBot:
         # Calculate profit/loss
         profit_pct = (current_price - self.entry_price) / self.entry_price
         
-        # Exit conditions with enhanced logic
-        exit_reasons = []
+        # Sri Crypto Sell Strategy Analysis
+        self.indicators_logger.info(
+            f"📊 SRI CRYPTO SELL ANALYSIS - Price: ${current_price:.4f}, Entry: ${self.entry_price:.4f}, "
+            f"P&L: {profit_pct:.2%}"
+        )
         
+        # Log current indicator states
+        self.indicators_logger.info(
+            f"🔍 BB Analysis - Upper: ${bb_upper:.4f}, Lower: ${bb_lower:.4f}, "
+            f"Price vs Upper: {((current_price / bb_upper - 1) * 100):.2f}%"
+        )
+        
+        self.indicators_logger.info(
+            f"📈 Stoch RSI - K: {stoch_rsi_k:.2f}, D: {stoch_rsi_d:.2f}, "
+            f"Overbought (>80): {stoch_rsi_k > 80 and stoch_rsi_d > 80}"
+        )
+        
+        self.indicators_logger.info(
+            f"🎯 Fractals - Up: {up_fractal}, Down: {down_fractal}, "
+            f"DEMA: ${dema:.4f}, Price vs DEMA: {((current_price / dema - 1) * 100):.2f}%"
+        )
+        
+        # Sri Crypto Sell Conditions
+        sri_sell_conditions = []
+        sri_sell_reasons = []
+        
+        # 1. Price above Bollinger Band Upper (Sri Crypto overbought)
+        if bb_upper and current_price >= bb_upper:
+            sri_sell_conditions.append(True)
+            sri_sell_reasons.append("BB_UPPER_BREACH")
+        else:
+            sri_sell_conditions.append(False)
+        
+        # 2. Stochastic RSI Overbought (both K and D > 80)
+        if stoch_rsi_k and stoch_rsi_d and stoch_rsi_k > 80 and stoch_rsi_d > 80:
+            sri_sell_conditions.append(True)
+            sri_sell_reasons.append("STOCH_RSI_OVERBOUGHT")
+        else:
+            sri_sell_conditions.append(False)
+        
+        # 3. Up Fractal confirmation (resistance level)
+        if up_fractal:
+            sri_sell_conditions.append(True)
+            sri_sell_reasons.append("UP_FRACTAL_RESISTANCE")
+        else:
+            sri_sell_conditions.append(False)
+        
+        # 4. Price significantly above DEMA (trend exhaustion)
+        if dema and current_price > dema * 1.02:  # 2% above DEMA
+            sri_sell_conditions.append(True)
+            sri_sell_reasons.append("DEMA_DIVERGENCE")
+        else:
+            sri_sell_conditions.append(False)
+        
+        # 5. RSI extreme overbought (>75)
+        if rsi and rsi > 75:
+            sri_sell_conditions.append(True)
+            sri_sell_reasons.append("RSI_EXTREME_OB")
+        else:
+            sri_sell_conditions.append(False)
+        
+        # 6. TD Sequential Sell Setup (Sri Crypto TD Strategy)
+        td_setup_sell = indicators.get('setup_sell', False)
+        td_countdown = indicators.get('countdown', 0)
+        td_perfect_signal = indicators.get('perfect_signal', False)
+        
+        # TD Sequential sell conditions
+        if td_setup_sell:
+            sri_sell_conditions.append(True)
+            sri_sell_reasons.append("TD_SETUP_SELL")
+        else:
+            sri_sell_conditions.append(False)
+        
+        # TD Countdown near completion (sell pressure)
+        if td_countdown >= 8:
+            sri_sell_conditions.append(True)
+            sri_sell_reasons.append("TD_COUNTDOWN_HIGH")
+        else:
+            sri_sell_conditions.append(False)
+        
+        # TD Perfect 13 signal (strong sell)
+        if td_perfect_signal:
+            sri_sell_conditions.append(True)
+            sri_sell_reasons.append("TD_PERFECT_SELL")
+        else:
+            sri_sell_conditions.append(False)
+        
+        # TD Sequential specific logging for sell
+        if td_setup_sell or td_countdown > 0:
+            self.indicators_logger.info(
+                f"📊 TD_SEQUENTIAL_SELL - Setup: {td_setup_sell}, Countdown: {td_countdown}/13, "
+                f"Perfect: {td_perfect_signal}, Risk: ${indicators.get('td_risk_level', 0):.4f}"
+            )
+        
+        # Calculate Sri Signal Strength for Sell
+        sri_sell_strength = sum(sri_sell_conditions) / len(sri_sell_conditions)
+        required_sell_strength = 0.6  # 60% of conditions must be met
+        
+        self.strategy_logger.info(
+            f"🔴 SRI CRYPTO SELL CONDITIONS - Strength: {sri_sell_strength:.2f}, "
+            f"Required: {required_sell_strength:.2f}, Met: {sri_sell_strength >= required_sell_strength}"
+        )
+        
+        for i, (condition, reason) in enumerate(zip(sri_sell_conditions, sri_sell_reasons)):
+            status = "✓" if condition else "✗"
+            self.strategy_logger.info(f"   {i+1}. {reason}: {status}")
+        
+        # Sri Crypto Strategy Exit Logic
+        sri_sell_signal = sri_sell_strength >= required_sell_strength
+        
+        # Priority 1: Sri Crypto Strategy Signal (if strong enough)
+        if sri_sell_signal:
+            strategy_name = "SRI_CRYPTO_BB_WF_STRSI_TD"
+            if strategy_name in self.strategy_stats:
+                # Update strategy performance tracking
+                if profit_pct > 0:
+                    self.strategy_stats[strategy_name]['wins'] += 1
+                else:
+                    self.strategy_stats[strategy_name]['losses'] += 1
+                self.strategy_stats[strategy_name]['total_profit'] += profit_pct
+                
+                # Track TD Sequential sell metrics
+                if td_setup_sell:
+                    self.strategy_stats[strategy_name]['td_setups_detected'] += 1
+                if td_perfect_signal:
+                    self.strategy_stats[strategy_name]['td_perfect_signals'] += 1
+                if td_countdown >= 8:
+                    self.strategy_stats[strategy_name]['td_countdown_signals'] += 1
+            
+            self.strategy_logger.info(
+                f"🎯 SRI CRYPTO SELL SIGNAL TRIGGERED - Strength: {sri_sell_strength:.2f}, "
+                f"Reasons: {', '.join([r for r, c in zip(sri_sell_reasons, sri_sell_conditions) if c])}"
+            )
+            
+            self.signals_logger.info(
+                f"🔴 SELL SIGNAL GENERATED - Strategy: {strategy_name}, "
+                f"Price: ${current_price:.4f}, P&L: {profit_pct:.2%}, Strength: {sri_sell_strength:.2f}"
+            )
+            
+            return True, f"SRI_CRYPTO_SELL_{sri_sell_strength:.2f}"
+        
+        # Priority 2: Risk Management Exits (Always check these)
         # 1. Dynamic take profit based on ATR
         if self.config['trading']['enhanced_features'].get('dynamic_thresholds', False):
             # ATR-based take profit (1.5-2.0 × ATR)
@@ -1393,6 +2148,9 @@ class EnhancedTradingBot:
             take_profit_threshold = self.config['strategy'].get('take_profit', 0.005)
         
         if profit_pct >= take_profit_threshold:
+            self.signals_logger.info(
+                f"💰 TAKE PROFIT - P&L: {profit_pct:.2%}, Threshold: {take_profit_threshold:.2%}"
+            )
             return True, f"TAKE_PROFIT_{profit_pct:.2%}"
         
         # 2. Dynamic stop loss based on ATR
@@ -1404,58 +2162,75 @@ class EnhancedTradingBot:
             stop_loss_threshold = self.config['strategy']['stop_loss']
         
         if profit_pct <= -stop_loss_threshold:
+            self.signals_logger.info(
+                f"🛑 STOP LOSS - P&L: {profit_pct:.2%}, Threshold: {-stop_loss_threshold:.2%}"
+            )
             return True, f"STOP_LOSS_{profit_pct:.2%}"
         
         # 3. Trailing stop loss
         if (self.trailing_stop_price and 
             self.config['trading']['enhanced_features'].get('trailing_stops', False) and 
             current_price <= self.trailing_stop_price):
+            self.signals_logger.info(
+                f"📉 TRAILING STOP - Price: ${current_price:.4f}, Stop: ${self.trailing_stop_price:.4f}"
+            )
             return True, f"TRAILING_STOP_{current_price:.4f}"
         
+        # Priority 3: Traditional Technical Exits (Secondary)
         # 4. Price above dynamic SMA threshold (trend reversal)
         sell_threshold = sma * (1 + exit_threshold)
         if current_price >= sell_threshold:
+            self.signals_logger.info(
+                f"📈 SMA REVERSAL - Price: ${current_price:.4f}, Threshold: ${sell_threshold:.4f}"
+            )
             return True, f"SMA_REVERSAL_{current_price:.4f}"
         
-        # 5. RSI overbought with divergence check
-        if rsi and rsi > 75:  # More selective than 70
-            # Check for bearish divergence
-            bearish_divergence = indicators.get('bearish_divergence', False)
-            if bearish_divergence:
-                return True, f"RSI_DIVERGENCE_{rsi:.1f}"
-            elif rsi > 80:  # Very overbought
-                return True, f"RSI_OVERBOUGHT_{rsi:.1f}"
-        
-        # 6. Price near enhanced Bollinger Band upper
+        # 5. Enhanced Bollinger Band upper breach (if not caught by Sri Crypto)
         if bb_upper and current_price >= bb_upper * 0.995:  # Tighter threshold
+            self.signals_logger.info(
+                f"🔴 BB UPPER BREACH - Price: ${current_price:.4f}, BB Upper: ${bb_upper:.4f}"
+            )
             return True, f"BB_UPPER_{current_price:.4f}"
         
-        # 7. Grok AI: Time-based exit (5-hour max hold time)
+        # Priority 4: Time and AI-based Exits
+        # 6. Grok AI: Time-based exit (5-hour max hold time)
         if hasattr(self, 'entry_time') and self.entry_time:
             time_in_position = (datetime.now() - self.entry_time).total_seconds() / 3600  # hours
             max_hold_time = self.config['strategy']['risk_management']['time_exit_hours']  # Grok AI: 5 hours
             
             if time_in_position >= max_hold_time:
-                self.logger.info(f"Grok AI Time Exit - Position held for {time_in_position:.1f}h (max: {max_hold_time}h)")
+                self.signals_logger.info(
+                    f"⏰ TIME EXIT - Position held: {time_in_position:.1f}h, Max: {max_hold_time}h"
+                )
                 return True, f"GROK_TIME_EXIT_{time_in_position:.1f}h"
         
-        # 8. Multi-timeframe exit signals
+        # 7. Multi-timeframe exit signals
         if self.config['trading']['enhanced_features'].get('multi_timeframe', False):
             try:
                 multi_tf_signals = await self.get_multi_timeframe_signals(current_price)
                 if not multi_tf_signals['trend_1h_bullish']:
+                    self.signals_logger.info("📉 MULTI-TIMEFRAME BEARISH - 1H trend turned bearish")
                     return True, "1H_TREND_BEARISH"
             except Exception as e:
                 self.logger.error(f"Multi-timeframe exit error: {e}")
         
-        # 9. AI ensemble exit signal
+        # 8. AI ensemble exit signal
         if self.config['trading']['enhanced_features'].get('ai_ensemble', False):
             try:
                 ai_ensemble_signal, ai_ensemble_confidence = await self.get_ai_ensemble_signal(current_price, indicators)
                 if not ai_ensemble_signal and ai_ensemble_confidence > 0.7:
+                    self.signals_logger.info(
+                        f"🤖 AI ENSEMBLE EXIT - Confidence: {ai_ensemble_confidence:.2f}"
+                    )
                     return True, f"AI_ENSEMBLE_EXIT_{ai_ensemble_confidence:.2f}"
             except Exception as e:
                 self.logger.error(f"AI ensemble exit error: {e}")
+        
+        # No exit signal
+        self.strategy_logger.info(
+            f"✅ HOLD POSITION - Sri Strength: {sri_sell_strength:.2f}, P&L: {profit_pct:.2%}, "
+            f"No exit conditions met"
+        )
         
         return False, ""
         
