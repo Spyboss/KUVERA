@@ -28,7 +28,7 @@ bot_instance = None
 bot_thread = None
 bot_startup_logs = []
 bot_stats = {
-    'status': 'initializing',  # Changed from 'stopped' to 'initializing'
+    'status': 'stopped',  # Start with stopped status
     'balance': 0.0,
     'trades_today': 0,
     'profit_loss': 0.0,
@@ -37,7 +37,7 @@ bot_stats = {
     'win_rate': 0.0,
     'uptime': '0:00:00',
     'startup_progress': 0,
-    'startup_stage': 'preparing',  # Changed from 'idle' to 'preparing'
+    'startup_stage': 'idle',  # Start with idle
     'error_message': None
 }
 
@@ -50,33 +50,37 @@ class WebLogHandler(logging.Handler):
     def emit(self, record):
         global recent_logs, bot_startup_logs, bot_stats
         
-        log_entry = {
-            'timestamp': datetime.fromtimestamp(record.created).strftime('%H:%M:%S.%f')[:-3],
-            'level': record.levelname,
-            'message': record.getMessage(),
-            'module': record.name,
-            'category': self._categorize_log(record.getMessage())
-        }
-        
-        # Add to recent logs
-        recent_logs.append(log_entry)
-        if len(recent_logs) > max_logs:
-            recent_logs.pop(0)
-        
-        # Track startup logs separately - Enhanced capture logic
-        current_time = datetime.now()
-        time_since_start = (current_time - start_time).total_seconds()
-        
-        # Always capture startup logs during first 60 seconds or when bot is starting/initializing
-        startup_keywords = ['starting', 'dashboard', 'flask', 'serving', 'kuvera', 'bot', 'trading', 'web', 'port', 'available', 'running']
-        
-        if (bot_stats['status'] in ['starting', 'initializing', 'preparing'] or 
-            time_since_start < 60 or  # Extended to 60 seconds for better capture
-            any(keyword in log_entry['message'].lower() for keyword in startup_keywords) or
-            record.levelname in ['INFO', 'WARNING', 'ERROR']):
-            bot_startup_logs.append(log_entry)
-            if len(bot_startup_logs) > 100:  # Increased to keep more startup logs
-                bot_startup_logs.pop(0)
+        try:
+            log_entry = {
+                'timestamp': datetime.fromtimestamp(record.created).strftime('%H:%M:%S.%f')[:-3],
+                'level': record.levelname,
+                'message': record.getMessage(),
+                'module': record.name,
+                'category': self._categorize_log(record.getMessage())
+            }
+            
+            # Add to recent logs
+            recent_logs.append(log_entry)
+            if len(recent_logs) > max_logs:
+                recent_logs.pop(0)
+            
+            # Track startup logs separately - Enhanced capture logic
+            current_time = datetime.now()
+            time_since_start = (current_time - start_time).total_seconds()
+            
+            # Always capture startup logs during first 120 seconds or when bot is starting/initializing
+            startup_keywords = ['starting', 'dashboard', 'flask', 'serving', 'kuvera', 'bot', 'trading', 'web', 'port', 'available', 'running', 'initializing', 'setup', 'loading', 'connecting', 'ready']
+            
+            if (bot_stats['status'] in ['starting', 'initializing', 'preparing'] or 
+                time_since_start < 120 or  # Extended to 120 seconds for better capture
+                any(keyword in log_entry['message'].lower() for keyword in startup_keywords) or
+                record.levelname in ['INFO', 'WARNING', 'ERROR']):
+                bot_startup_logs.append(log_entry)
+                if len(bot_startup_logs) > 150:  # Increased to keep more startup logs
+                    bot_startup_logs.pop(0)
+        except Exception as e:
+            # Fallback logging to prevent handler errors
+            print(f"WebLogHandler error: {e}")
     
     def _categorize_log(self, message):
         """Categorize log messages for better filtering"""
@@ -100,6 +104,11 @@ class WebLogHandler(logging.Handler):
 # Setup logging
 web_handler = WebLogHandler()
 logging.getLogger().addHandler(web_handler)
+
+# Add immediate startup logs to ensure they're captured
+logging.info("🔧 Web log handler initialized")
+logging.info("📊 Log capture system active")
+logging.info("🌐 Dashboard logging ready")
 
 @app.route('/')
 def dashboard():
@@ -322,14 +331,22 @@ def run_bot_in_background():
     global bot_instance, bot_stats
     
     try:
+        logging.info("🚀 Starting bot initialization process...")
+        
         if EnhancedTradingBot is None:
-            logging.error("EnhancedTradingBot not available - check bot.py import")
-            bot_stats['status'] = 'error'
+            error_msg = "❌ EnhancedTradingBot not available - check bot.py import"
+            logging.error(error_msg)
+            bot_stats.update({
+                'status': 'error',
+                'startup_stage': 'error',
+                'error_message': error_msg
+            })
             return
             
         # Stage 1: Environment Setup
         logging.info("🔧 Setting up environment variables...")
         bot_stats.update({
+            'status': 'starting',
             'startup_stage': 'environment_setup',
             'startup_progress': 20
         })
@@ -338,7 +355,9 @@ def run_bot_in_background():
         os.environ['TRADING_MODE'] = os.environ.get('TRADING_MODE', 'testnet')
         os.environ['AI_ENABLED'] = os.environ.get('AI_ENABLED', 'true')
         os.environ['STRATEGY_TYPE'] = os.environ.get('STRATEGY_TYPE', 'mean_reversion')
-        time.sleep(0.5)  # Brief pause for UI update
+        
+        logging.info(f"✅ Environment configured - Mode: {os.environ.get('TRADING_MODE')}, AI: {os.environ.get('AI_ENABLED')}, Strategy: {os.environ.get('STRATEGY_TYPE')}")
+        time.sleep(1)  # Brief pause for UI update
         
         # Stage 2: Loading Configuration
         logging.info("📋 Loading configuration and settings...")
@@ -358,9 +377,20 @@ def run_bot_in_background():
             'startup_progress': 60
         })
         
-        bot_instance = EnhancedTradingBot()
-        bot_instance.testnet_mode = os.environ.get('TRADING_MODE', 'testnet').lower() == 'testnet'
-        bot_instance.ai_enabled = os.environ.get('AI_ENABLED', 'true').lower() == 'true'
+        try:
+            bot_instance = EnhancedTradingBot()
+            bot_instance.testnet_mode = os.environ.get('TRADING_MODE', 'testnet').lower() == 'testnet'
+            bot_instance.ai_enabled = os.environ.get('AI_ENABLED', 'true').lower() == 'true'
+            logging.info("✅ Bot instance created successfully")
+        except Exception as e:
+            error_msg = f"❌ Failed to initialize bot: {str(e)}"
+            logging.error(error_msg)
+            bot_stats.update({
+                'status': 'error',
+                'startup_stage': 'error',
+                'error_message': error_msg
+            })
+            return
         
         # Stage 4: Connecting to APIs
         logging.info("🌐 Connecting to Binance API and external services...")
@@ -436,23 +466,27 @@ if __name__ == '__main__':
     )
     
     # Immediate startup logs for web dashboard
-    logging.info("🚀 Starting Kuvera Grid Trading Bot Web Dashboard")
+    logging.info("🚀 Starting Kuvera Grid Trading Bot Web Dashboard v1.1")
     logging.info("📱 Initializing Flask application...")
     logging.info("🔧 Setting up web log handler...")
     logging.info("📊 Loading dashboard configuration...")
+    logging.info("🌐 Web dashboard initialization complete")
     
     # Log environment information
     logging.info(f"📊 Trading Mode: {os.environ.get('TRADING_MODE', 'testnet')}")
     logging.info(f"🤖 AI Enabled: {os.environ.get('AI_ENABLED', 'true')}")
+    logging.info(f"📈 Strategy Type: {os.environ.get('STRATEGY_TYPE', 'mean_reversion')}")
     logging.info(f"🔧 Start Bot: {os.environ.get('START_BOT', 'true')}")
     logging.info(f"🌐 Port: {os.environ.get('PORT', '5000')}")
     logging.info(f"🐛 Debug Mode: {os.environ.get('FLASK_DEBUG', 'false')}")
+    logging.info("✅ Environment configuration loaded successfully")
     
     # Always start bot in background thread by default (changed behavior)
     start_bot_env = os.environ.get('START_BOT', 'true').lower()
     if start_bot_env == 'true':
         try:
             logging.info("🚀 Auto-starting bot thread...")
+            logging.info("📋 Preparing bot initialization sequence...")
             bot_stats.update({
                 'status': 'starting',
                 'startup_stage': 'initializing',
@@ -461,8 +495,11 @@ if __name__ == '__main__':
             bot_thread = Thread(target=run_bot_in_background, daemon=True)
             bot_thread.start()
             logging.info("✅ Bot thread started successfully")
+            logging.info("⏳ Bot initialization in progress - check logs for updates")
         except Exception as e:
-            logging.error(f"❌ Failed to start bot thread: {e}")
+            error_msg = f"❌ Failed to start bot thread: {e}"
+            logging.error(error_msg)
+            logging.error(f"🔍 Error details: {type(e).__name__}: {str(e)}")
             bot_stats.update({
                 'status': 'error',
                 'startup_stage': 'error',
@@ -470,6 +507,7 @@ if __name__ == '__main__':
             })
     else:
         logging.info("⏸️ Bot auto-start disabled via START_BOT environment variable")
+        logging.info("📱 Web dashboard ready - bot can be started manually")
         bot_stats.update({
             'status': 'stopped',
             'startup_stage': 'manual'
