@@ -66,6 +66,7 @@
         
         .card-header {
             display: flex;
+            justify-content: space-between;
             align-items: center;
             margin-bottom: 20px;
         }
@@ -79,7 +80,27 @@
         .card-header h3 {
             font-size: 1.3em;
             color: #333;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
+        
+        .status.running { color: #4CAF50; }
+        .status.stopped { color: #F44336; }
+        .status.error { color: #FF5722; }
+        .status.starting { color: #2196F3; animation: pulse 1.5s infinite; }
+        
+        .metric-value.starting {
+             color: #2196F3;
+             animation: pulse 1.5s infinite;
+         }
+         
+         @keyframes pulse {
+             0% { opacity: 1; }
+             50% { opacity: 0.6; }
+             100% { opacity: 1; }
+         }
         
         .status-indicator {
             display: inline-block;
@@ -169,19 +190,117 @@
         }
         
         .logs-container {
-            background: #1a1a1a;
-            border-radius: 10px;
-            padding: 20px;
-            height: 400px;
+            height: 350px;
             overflow-y: auto;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 10px;
             font-family: 'Courier New', monospace;
-            font-size: 0.9em;
+            font-size: 12px;
+        }
+        
+        .log-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-left: auto;
+        }
+        
+        .log-filter {
+            padding: 4px 8px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        
+        .btn-small {
+            padding: 4px 8px;
+            font-size: 12px;
+            min-width: auto;
+        }
+        
+        .startup-progress {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #2a2a2a;
+            border-radius: 6px;
+            border: 1px solid #444;
+        }
+        
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #e0e0e0;
+        }
+        
+        .progress-bar {
+            height: 8px;
+            background: #333;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            width: 0%;
+            transition: width 0.3s ease;
         }
         
         .log-entry {
             margin-bottom: 5px;
-            padding: 5px;
+            display: flex;
+            align-items: center;
+            padding: 2px 0;
+            border-left: 3px solid transparent;
+        }
+        
+        .log-entry.startup { border-left-color: #2196F3; }
+        .log-entry.trading { border-left-color: #4CAF50; }
+        .log-entry.ai { border-left-color: #9C27B0; }
+        .log-entry.strategy { border-left-color: #FF9800; }
+        .log-entry.error { border-left-color: #F44336; }
+        .log-entry.warning { border-left-color: #FFC107; }
+        
+        .log-time {
+            color: #888;
+            margin-right: 10px;
+            min-width: 90px;
+            font-size: 11px;
+        }
+        
+        .log-level {
+            padding: 2px 6px;
             border-radius: 3px;
+            margin-right: 10px;
+            min-width: 50px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 10px;
+        }
+        
+        .log-level.INFO { background: #2196F3; color: white; }
+        .log-level.WARNING { background: #FF9800; color: white; }
+        .log-level.ERROR { background: #F44336; color: white; }
+        .log-level.DEBUG { background: #9E9E9E; color: white; }
+        .log-level.CRITICAL { background: #D32F2F; color: white; }
+        
+        .log-message {
+            flex: 1;
+            color: #e0e0e0;
+            line-height: 1.3;
+        }
+        
+        .log-module {
+            color: #666;
+            font-size: 10px;
+            margin-left: 10px;
+            min-width: 80px;
         }
         
         .log-info { color: #4CAF50; }
@@ -384,12 +503,36 @@
         <!-- Live Logs -->
         <div class="card">
             <div class="card-header">
-                <i class="fas fa-terminal"></i>
-                <h3>Live Logs</h3>
+                <h3><i class="fas fa-terminal"></i> Live Logs</h3>
+                <div class="log-controls">
+                    <select id="log-category-filter" class="log-filter">
+                        <option value="all">All Logs</option>
+                        <option value="startup">Startup</option>
+                        <option value="trading">Trading</option>
+                        <option value="ai">AI/ML</option>
+                        <option value="strategy">Strategy</option>
+                        <option value="error">Errors</option>
+                        <option value="warning">Warnings</option>
+                    </select>
+                    <button id="clear-logs-btn" class="btn btn-small">Clear</button>
+                    <button id="startup-logs-btn" class="btn btn-small">Startup Logs</button>
+                </div>
             </div>
-            
-            <div id="logs-container" class="logs-container">
-                <div class="loading">Loading logs...</div>
+            <div class="card-content">
+                <!-- Startup Progress Bar -->
+                <div id="startup-progress-container" class="startup-progress" style="display: none;">
+                    <div class="progress-info">
+                        <span id="startup-stage">Initializing...</span>
+                        <span id="startup-percentage">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div id="startup-progress-fill" class="progress-fill"></div>
+                    </div>
+                </div>
+                
+                <div id="logs-container" class="logs-container">
+                    <div class="loading">Loading logs...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -403,13 +546,56 @@
             updateLogs();
             updateTrades();
             
-            // Start auto-refresh
-            updateInterval = setInterval(() => {
-                updateDashboard();
-                updateLogs();
-                updateTrades();
-            }, 30000); // Update every 30 seconds
+            // Setup log controls
+            setupLogControls();
+            
+            // Update every 5 seconds
+            setInterval(updateDashboard, 5000);
+            setInterval(updateLogs, 2000);  // More frequent for live logs
+            setInterval(updateTrades, 10000);
         });
+        
+        function setupLogControls() {
+            // Log category filter
+            const categoryFilter = document.getElementById('log-category-filter');
+            if (categoryFilter) {
+                categoryFilter.addEventListener('change', function() {
+                    currentLogFilter = this.value;
+                    showStartupOnly = false;
+                    updateLogs();
+                });
+            }
+            
+            // Clear logs button
+            const clearLogsBtn = document.getElementById('clear-logs-btn');
+            if (clearLogsBtn) {
+                clearLogsBtn.addEventListener('click', function() {
+                    const logsContainer = document.getElementById('logs-container');
+                    logsContainer.innerHTML = '<div class="log-entry"><span class="log-message">Logs cleared</span></div>';
+                });
+            }
+            
+            // Startup logs button
+            const startupLogsBtn = document.getElementById('startup-logs-btn');
+            if (startupLogsBtn) {
+                startupLogsBtn.addEventListener('click', function() {
+                    showStartupOnly = !showStartupOnly;
+                    currentLogFilter = 'all';
+                    
+                    // Update button text
+                    this.textContent = showStartupOnly ? 'All Logs' : 'Startup Logs';
+                    this.style.background = showStartupOnly ? '#2196F3' : '';
+                    
+                    // Reset category filter
+                    const categoryFilter = document.getElementById('log-category-filter');
+                    if (categoryFilter) {
+                        categoryFilter.value = 'all';
+                    }
+                    
+                    updateLogs();
+                });
+            }
+        }
         
         function updateDashboard() {
             axios.get('/api/status')
@@ -417,9 +603,39 @@
                     const data = response.data;
                     
                     // Update status
-                    document.getElementById('bot-status').textContent = data.status;
-                    document.getElementById('uptime').textContent = data.uptime;
-                    document.getElementById('last-update').textContent = new Date(data.last_update).toLocaleString();
+                    const statusElement = document.getElementById('bot-status');
+                    const uptimeElement = document.getElementById('uptime');
+                    const lastUpdateElement = document.getElementById('last-update');
+                    
+                    // Update status with startup progress
+                    if (data.status === 'starting' && data.startup_stage) {
+                        const stageTexts = {
+                            'initializing': 'Initializing...',
+                            'environment_setup': 'Setting up environment...',
+                            'loading_config': 'Loading configuration...',
+                            'initializing_bot': 'Initializing bot...',
+                            'connecting_apis': 'Connecting to APIs...',
+                            'finalizing': 'Finalizing startup...',
+                            'ready': 'Ready!'
+                        };
+                        statusElement.textContent = stageTexts[data.startup_stage] || 'Starting...';
+                        statusElement.className = 'metric-value starting';
+                        
+                        // Show progress percentage
+                        if (data.startup_progress) {
+                            statusElement.textContent += ` (${data.startup_progress}%)`;
+                        }
+                    } else if (data.status === 'error' && data.error_message) {
+                        statusElement.textContent = 'Error';
+                        statusElement.className = 'metric-value loss';
+                        statusElement.title = data.error_message;  // Show error on hover
+                    } else {
+                        statusElement.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+                        statusElement.className = `metric-value ${data.status === 'running' ? 'profit' : 'neutral'}`;
+                    }
+                    
+                    uptimeElement.textContent = data.uptime;
+                    lastUpdateElement.textContent = new Date(data.last_update).toLocaleString();
                     
                     // Update status indicator
                     const indicator = document.getElementById('status-indicator');
@@ -442,34 +658,107 @@
                 });
         }
         
+        let currentLogFilter = 'all';
+        let showStartupOnly = false;
+        
         function updateLogs() {
-            axios.get('/api/logs')
+            const params = new URLSearchParams({
+                category: currentLogFilter,
+                limit: 100,
+                startup: showStartupOnly.toString()
+            });
+            
+            axios.get(`/api/logs?${params}`)
                 .then(response => {
-                    const logs = response.data.logs;
-                    const container = document.getElementById('logs-container');
+                    const data = response.data;
+                    const logsContainer = document.getElementById('logs-container');
                     
-                    if (logs.length === 0) {
-                        container.innerHTML = '<div class="loading">No logs available</div>';
+                    // Update startup progress if bot is starting
+                    updateStartupProgress(data.bot_status, data.startup_stage);
+                    
+                    // Clear and populate logs
+                    logsContainer.innerHTML = '';
+                    
+                    if (data.logs.length === 0) {
+                        logsContainer.innerHTML = '<div class="log-entry"><span class="log-message">No logs available for selected filter.</span></div>';
                         return;
                     }
                     
-                    const logsHtml = logs.map(log => {
-                        const levelClass = `log-${log.level.toLowerCase()}`;
-                        return `
-                            <div class="log-entry ${levelClass}">
-                                <span class="log-timestamp">[${log.timestamp}]</span>
-                                <span class="log-level">[${log.level}]</span>
-                                <span class="log-message">${log.message}</span>
-                            </div>
+                    data.logs.forEach(log => {
+                        const logEntry = document.createElement('div');
+                        logEntry.className = `log-entry ${log.category || 'general'}`;
+                        logEntry.innerHTML = `
+                            <span class="log-time">${log.timestamp}</span>
+                            <span class="log-level ${log.level}">${log.level}</span>
+                            <span class="log-message">${log.message}</span>
+                            ${log.module ? `<span class="log-module">[${log.module}]</span>` : ''}
                         `;
-                    }).join('');
+                        logsContainer.appendChild(logEntry);
+                    });
                     
-                    container.innerHTML = logsHtml;
-                    container.scrollTop = container.scrollHeight;
+                    // Auto-scroll to bottom
+                    logsContainer.scrollTop = logsContainer.scrollHeight;
+                    
+                    // Update log count in filter dropdown
+                    updateLogCounts(data);
                 })
                 .catch(error => {
-                    console.error('Error updating logs:', error);
+                    console.error('Error fetching logs:', error);
+                    const logsContainer = document.getElementById('logs-container');
+                    logsContainer.innerHTML = '<div class="log-entry error"><span class="log-message">Error loading logs</span></div>';
                 });
+        }
+        
+        function updateStartupProgress(botStatus, startupStage) {
+            const progressContainer = document.getElementById('startup-progress-container');
+            const stageElement = document.getElementById('startup-stage');
+            const percentageElement = document.getElementById('startup-percentage');
+            const progressFill = document.getElementById('startup-progress-fill');
+            
+            if (botStatus === 'starting' || botStatus === 'initializing') {
+                progressContainer.style.display = 'block';
+                
+                // Update stage text
+                const stageTexts = {
+                    'initializing': '🔧 Initializing...',
+                    'environment_setup': '🔧 Setting up environment...',
+                    'loading_config': '📋 Loading configuration...',
+                    'initializing_bot': '🤖 Initializing bot...',
+                    'connecting_apis': '🌐 Connecting to APIs...',
+                    'finalizing': '⚡ Finalizing startup...',
+                    'ready': '✅ Ready!'
+                };
+                
+                stageElement.textContent = stageTexts[startupStage] || 'Starting...';
+                
+                // Update progress based on stage
+                const progressMap = {
+                    'initializing': 10,
+                    'environment_setup': 20,
+                    'loading_config': 40,
+                    'initializing_bot': 60,
+                    'connecting_apis': 80,
+                    'finalizing': 95,
+                    'ready': 100
+                };
+                
+                const progress = progressMap[startupStage] || 0;
+                percentageElement.textContent = `${progress}%`;
+                progressFill.style.width = `${progress}%`;
+                
+                if (progress === 100) {
+                    setTimeout(() => {
+                        progressContainer.style.display = 'none';
+                    }, 2000);
+                }
+            } else {
+                progressContainer.style.display = 'none';
+            }
+        }
+        
+        function updateLogCounts(data) {
+            // Could add log counts to filter options in the future
+            // For now, just update the filter dropdown if needed
         }
         
         function updateTrades() {

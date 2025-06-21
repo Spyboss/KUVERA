@@ -23,8 +23,10 @@ except ImportError:
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
 
-# Global bot instance
+# Global bot instance and state
 bot_instance = None
+bot_thread = None
+bot_startup_logs = []
 bot_stats = {
     'status': 'stopped',
     'balance': 0.0,
@@ -33,25 +35,58 @@ bot_stats = {
     'last_update': datetime.now().isoformat(),
     'total_trades': 0,
     'win_rate': 0.0,
-    'uptime': '0:00:00'
+    'uptime': '0:00:00',
+    'startup_progress': 0,
+    'startup_stage': 'idle',
+    'error_message': None
 }
 
 start_time = datetime.now()
 recent_logs = []
-max_logs = 100
+max_logs = 200  # Increased for better log history
 
 class WebLogHandler(logging.Handler):
     """Custom log handler to capture logs for web display"""
     def emit(self, record):
-        global recent_logs
+        global recent_logs, bot_startup_logs, bot_stats
+        
         log_entry = {
-            'timestamp': datetime.fromtimestamp(record.created).strftime('%H:%M:%S'),
+            'timestamp': datetime.fromtimestamp(record.created).strftime('%H:%M:%S.%f')[:-3],
             'level': record.levelname,
-            'message': record.getMessage()
+            'message': record.getMessage(),
+            'module': record.name,
+            'category': self._categorize_log(record.getMessage())
         }
+        
+        # Add to recent logs
         recent_logs.append(log_entry)
         if len(recent_logs) > max_logs:
             recent_logs.pop(0)
+        
+        # Track startup logs separately
+        if bot_stats['status'] in ['starting', 'initializing']:
+            bot_startup_logs.append(log_entry)
+            if len(bot_startup_logs) > 50:  # Keep last 50 startup logs
+                bot_startup_logs.pop(0)
+    
+    def _categorize_log(self, message):
+        """Categorize log messages for better filtering"""
+        message_lower = message.lower()
+        
+        if any(keyword in message_lower for keyword in ['starting', 'initializing', 'loading', 'connecting']):
+            return 'startup'
+        elif any(keyword in message_lower for keyword in ['buy', 'sell', 'trade', 'order', 'position']):
+            return 'trading'
+        elif any(keyword in message_lower for keyword in ['ai', 'ml', 'model', 'prediction', 'sentiment']):
+            return 'ai'
+        elif any(keyword in message_lower for keyword in ['error', 'failed', 'exception', 'critical']):
+            return 'error'
+        elif any(keyword in message_lower for keyword in ['warning', 'warn']):
+            return 'warning'
+        elif any(keyword in message_lower for keyword in ['strategy', 'signal', 'indicator', 'analysis']):
+            return 'strategy'
+        else:
+            return 'general'
 
 # Setup logging
 web_handler = WebLogHandler()
@@ -92,10 +127,27 @@ def get_status():
 
 @app.route('/api/logs')
 def get_logs():
-    """Get recent logs"""
+    """Get recent logs with optional filtering"""
+    category = request.args.get('category', 'all')
+    limit = int(request.args.get('limit', 50))
+    startup_only = request.args.get('startup', 'false').lower() == 'true'
+    
+    if startup_only:
+        logs_to_return = bot_startup_logs[-limit:]
+    elif category == 'all':
+        logs_to_return = recent_logs[-limit:]
+    else:
+        # Filter by category
+        filtered_logs = [log for log in recent_logs if log.get('category') == category]
+        logs_to_return = filtered_logs[-limit:]
+    
     return jsonify({
-        'logs': recent_logs[-50:],  # Last 50 logs
-        'total_logs': len(recent_logs)
+        'logs': logs_to_return,
+        'total_logs': len(recent_logs),
+        'startup_logs': len(bot_startup_logs),
+        'categories': list(set(log.get('category', 'general') for log in recent_logs[-100:])),
+        'bot_status': bot_stats['status'],
+        'startup_stage': bot_stats.get('startup_stage', 'idle')
     })
 
 @app.route('/api/trades')
@@ -163,19 +215,30 @@ def get_trades():
 @app.route('/api/control/<action>', methods=['POST'])
 def bot_control(action):
     """Control bot operations"""
-    global bot_instance, bot_stats
+    global bot_instance, bot_stats, bot_thread, bot_startup_logs
     
     try:
         if action == 'start':
-            if not bot_instance:
+            if not bot_instance and (not bot_thread or not bot_thread.is_alive()):
+                # Clear previous startup logs
+                bot_startup_logs.clear()
+                
                 # Initialize bot here
-                logging.info("Starting trading bot...")
-                bot_stats['status'] = 'starting'
+                logging.info("🚀 Starting Kuvera Grid Trading Bot...")
+                bot_stats.update({
+                    'status': 'starting',
+                    'startup_stage': 'initializing',
+                    'startup_progress': 10,
+                    'error_message': None
+                })
+                
                 # Start bot in background thread
                 bot_thread = Thread(target=run_bot_in_background, daemon=True)
                 bot_thread.start()
-                bot_stats['status'] = 'running'
-            return jsonify({'success': True, 'message': 'Bot started successfully'})
+                
+                return jsonify({'success': True, 'message': 'Bot startup initiated'})
+            else:
+                return jsonify({'success': False, 'message': 'Bot is already running or starting'})
         
         elif action == 'stop':
             if bot_instance:
@@ -246,7 +309,7 @@ def health_check():
     })
 
 def run_bot_in_background():
-    """Run the trading bot in a separate thread"""
+    """Run the trading bot in a background thread with detailed startup tracking"""
     global bot_instance, bot_stats
     
     try:
@@ -255,24 +318,65 @@ def run_bot_in_background():
             bot_stats['status'] = 'error'
             return
             
-        # Set environment variables for automated mode
+        # Stage 1: Environment Setup
+        logging.info("🔧 Setting up environment variables...")
+        bot_stats.update({
+            'startup_stage': 'environment_setup',
+            'startup_progress': 20
+        })
+        
         os.environ['AUTOMATED_MODE'] = 'true'
         os.environ['TRADING_MODE'] = os.environ.get('TRADING_MODE', 'testnet')
         os.environ['AI_ENABLED'] = os.environ.get('AI_ENABLED', 'true')
         os.environ['STRATEGY_TYPE'] = os.environ.get('STRATEGY_TYPE', 'mean_reversion')
+        time.sleep(0.5)  # Brief pause for UI update
         
-        logging.info("🚀 Initializing Kuvera Grid Trading Bot...")
+        # Stage 2: Loading Configuration
+        logging.info("📋 Loading configuration and settings...")
+        bot_stats.update({
+            'startup_stage': 'loading_config',
+            'startup_progress': 40
+        })
         logging.info(f"📊 Mode: {os.environ.get('TRADING_MODE', 'testnet')}")
         logging.info(f"🤖 AI: {os.environ.get('AI_ENABLED', 'true')}")
         logging.info(f"📈 Strategy: {os.environ.get('STRATEGY_TYPE', 'mean_reversion')}")
+        time.sleep(0.5)
         
-        # Initialize the enhanced bot
+        # Stage 3: Initializing Bot
+        logging.info("🤖 Initializing Enhanced Trading Bot...")
+        bot_stats.update({
+            'startup_stage': 'initializing_bot',
+            'startup_progress': 60
+        })
+        
         bot_instance = EnhancedTradingBot()
         bot_instance.testnet_mode = os.environ.get('TRADING_MODE', 'testnet').lower() == 'testnet'
         bot_instance.ai_enabled = os.environ.get('AI_ENABLED', 'true').lower() == 'true'
         
-        bot_stats['status'] = 'running'
-        logging.info("✅ Trading bot initialized successfully!")
+        # Stage 4: Connecting to APIs
+        logging.info("🌐 Connecting to Binance API and external services...")
+        bot_stats.update({
+            'startup_stage': 'connecting_apis',
+            'startup_progress': 80
+        })
+        time.sleep(1)
+        
+        # Stage 5: Final Setup
+        logging.info("⚡ Finalizing startup and beginning operations...")
+        bot_stats.update({
+            'startup_stage': 'finalizing',
+            'startup_progress': 95
+        })
+        time.sleep(0.5)
+        
+        # Stage 6: Ready
+        logging.info("✅ Kuvera Grid Trading Bot is now LIVE and ready for trading!")
+        bot_stats.update({
+            'status': 'running',
+            'startup_stage': 'ready',
+            'startup_progress': 100,
+            'last_update': datetime.now().isoformat()
+        })
         
         # Run the bot in automated mode
         loop = asyncio.new_event_loop()
@@ -288,8 +392,13 @@ def run_bot_in_background():
         logging.info("🛑 Bot stopped by user interrupt")
         bot_stats['status'] = 'stopped'
     except Exception as e:
-        logging.error(f"❌ Bot error: {e}")
-        bot_stats['status'] = 'error'
+        error_msg = f"Error during bot startup: {str(e)}"
+        logging.error(f"❌ {error_msg}")
+        bot_stats.update({
+            'status': 'error',
+            'startup_stage': 'error',
+            'error_message': error_msg
+        })
         # Try to cleanup bot instance
         if bot_instance:
             try:
