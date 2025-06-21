@@ -28,7 +28,7 @@ bot_instance = None
 bot_thread = None
 bot_startup_logs = []
 bot_stats = {
-    'status': 'stopped',
+    'status': 'initializing',  # Changed from 'stopped' to 'initializing'
     'balance': 0.0,
     'trades_today': 0,
     'profit_loss': 0.0,
@@ -37,7 +37,7 @@ bot_stats = {
     'win_rate': 0.0,
     'uptime': '0:00:00',
     'startup_progress': 0,
-    'startup_stage': 'idle',
+    'startup_stage': 'preparing',  # Changed from 'idle' to 'preparing'
     'error_message': None
 }
 
@@ -63,16 +63,19 @@ class WebLogHandler(logging.Handler):
         if len(recent_logs) > max_logs:
             recent_logs.pop(0)
         
-        # Track startup logs separately
-        # Capture logs during initial app startup (first 30 seconds) or when bot is starting
+        # Track startup logs separately - Enhanced capture logic
         current_time = datetime.now()
         time_since_start = (current_time - start_time).total_seconds()
         
-        if (bot_stats['status'] in ['starting', 'initializing'] or 
-            time_since_start < 30 or  # First 30 seconds of app startup
-            any(keyword in log_entry['message'].lower() for keyword in ['starting', 'dashboard', 'flask', 'serving'])):
+        # Always capture startup logs during first 60 seconds or when bot is starting/initializing
+        startup_keywords = ['starting', 'dashboard', 'flask', 'serving', 'kuvera', 'bot', 'trading', 'web', 'port', 'available', 'running']
+        
+        if (bot_stats['status'] in ['starting', 'initializing', 'preparing'] or 
+            time_since_start < 60 or  # Extended to 60 seconds for better capture
+            any(keyword in log_entry['message'].lower() for keyword in startup_keywords) or
+            record.levelname in ['INFO', 'WARNING', 'ERROR']):
             bot_startup_logs.append(log_entry)
-            if len(bot_startup_logs) > 50:  # Keep last 50 startup logs
+            if len(bot_startup_logs) > 100:  # Increased to keep more startup logs
                 bot_startup_logs.pop(0)
     
     def _categorize_log(self, message):
@@ -432,23 +435,45 @@ if __name__ == '__main__':
         ]
     )
     
-    # Log startup information
+    # Immediate startup logs for web dashboard
     logging.info("🚀 Starting Kuvera Grid Trading Bot Web Dashboard")
+    logging.info("📱 Initializing Flask application...")
+    logging.info("🔧 Setting up web log handler...")
+    logging.info("📊 Loading dashboard configuration...")
+    
+    # Log environment information
     logging.info(f"📊 Trading Mode: {os.environ.get('TRADING_MODE', 'testnet')}")
     logging.info(f"🤖 AI Enabled: {os.environ.get('AI_ENABLED', 'true')}")
     logging.info(f"🔧 Start Bot: {os.environ.get('START_BOT', 'true')}")
+    logging.info(f"🌐 Port: {os.environ.get('PORT', '5000')}")
+    logging.info(f"🐛 Debug Mode: {os.environ.get('FLASK_DEBUG', 'false')}")
     
-    # Start bot in background thread if enabled
-    if os.environ.get('START_BOT', 'true').lower() == 'true':
+    # Always start bot in background thread by default (changed behavior)
+    start_bot_env = os.environ.get('START_BOT', 'true').lower()
+    if start_bot_env == 'true':
         try:
+            logging.info("🚀 Auto-starting bot thread...")
+            bot_stats.update({
+                'status': 'starting',
+                'startup_stage': 'initializing',
+                'startup_progress': 5
+            })
             bot_thread = Thread(target=run_bot_in_background, daemon=True)
             bot_thread.start()
             logging.info("✅ Bot thread started successfully")
         except Exception as e:
             logging.error(f"❌ Failed to start bot thread: {e}")
-            bot_stats['status'] = 'error'
+            bot_stats.update({
+                'status': 'error',
+                'startup_stage': 'error',
+                'error_message': str(e)
+            })
     else:
-        logging.info("⏸️ Bot auto-start disabled")
+        logging.info("⏸️ Bot auto-start disabled via START_BOT environment variable")
+        bot_stats.update({
+            'status': 'stopped',
+            'startup_stage': 'manual'
+        })
     
     # Start Flask app
     port = int(os.environ.get('PORT', 5000))
