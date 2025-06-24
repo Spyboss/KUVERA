@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     libblas-dev \
     liblapack-dev \
     gfortran \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -26,8 +27,15 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy application code
 COPY . .
 
-# Expose port
+# Make startup script executable
+RUN chmod +x start.sh
+
+# Expose port (Railway will dynamically assign PORT)
 EXPOSE 8000
 
-# Start command
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8000} --workers 1 --timeout 120 app:app"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
+
+# Start command using startup script
+CMD ["./start.sh"]

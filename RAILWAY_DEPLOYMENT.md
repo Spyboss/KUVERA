@@ -50,7 +50,36 @@ This guide will help you deploy your Kuvera Grid Trading Bot to Railway with an 
    - Click "New Project"
    - Select "Deploy from GitHub repo"
    - Choose your Kuvera Grid repository
-   - Railway will automatically detect it's a Python project
+   - Railway will automatically detect the Dockerfile
+
+3. **Configure Environment Variables**:
+   Click on your project → Variables tab and add:
+   
+   **Required Variables:**
+   ```
+   BINANCE_API_KEY=your_binance_api_key
+   BINANCE_SECRET_KEY=your_binance_secret_key
+   BINANCE_TESTNET_API_KEY=your_testnet_api_key
+   BINANCE_TESTNET_SECRET_KEY=your_testnet_secret_key
+   SECRET_KEY=your_flask_secret_key_here
+   ```
+   
+   **Optional Variables:**
+   ```
+   AUTOMATED_MODE=true
+   TRADING_MODE=testnet
+   AI_ENABLED=true
+   STRATEGY_TYPE=mean_reversion
+   START_BOT=true
+   FLASK_DEBUG=false
+   OPENROUTER_API_KEY=your_openrouter_key
+   NEWS_API_KEY=your_news_api_key
+   ```
+
+4. **Deploy**:
+   - Railway will automatically build and deploy
+   - Wait for the build to complete (5-10 minutes)
+   - Your bot will be available at the provided Railway URL
 
 3. **Configure Environment Variables**:
    Click on your project → Variables tab → Add these:
