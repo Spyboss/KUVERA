@@ -316,21 +316,186 @@
             position: fixed;
             top: 20px;
             right: 20px;
-            padding: 10px 15px;
-            border-radius: 8px;
-            font-size: 0.9rem;
-            font-weight: 600;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
             z-index: 1000;
+            cursor: help;
         }
 
         .connection-online {
-            background: #4CAF50;
+            background: linear-gradient(135deg, #4CAF50, #45a049);
             color: white;
+            box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
         }
 
         .connection-offline {
-            background: #F44336;
+            background: linear-gradient(135deg, #f44336, #d32f2f);
             color: white;
+            box-shadow: 0 2px 4px rgba(244, 67, 54, 0.3);
+        }
+
+        /* Toast Notifications */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            z-index: 10000;
+            max-width: 400px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            animation: slideInRight 0.3s ease-out;
+        }
+
+        .toast-success {
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            border-left: 4px solid #2e7d32;
+        }
+
+        .toast-error {
+            background: linear-gradient(135deg, #f44336, #d32f2f);
+            border-left: 4px solid #c62828;
+        }
+
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Stack multiple toasts */
+        .toast:nth-child(n+2) {
+            top: calc(20px + (60px * var(--toast-index, 0)));
+        }
+        
+        /* Log Entry Styles */
+        .log-entry {
+            padding: 12px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            border-left: 3px solid #ddd;
+            background: #f9f9f9;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            transition: all 0.3s ease;
+        }
+        
+        .log-entry.highlight {
+            background: rgba(255, 235, 59, 0.2);
+            transform: scale(1.01);
+        }
+        
+        .log-entry.startup {
+            border-left: 4px solid #4CAF50;
+            background: rgba(76, 175, 80, 0.08);
+            font-weight: 500;
+        }
+        
+        .log-entry.trading {
+            border-left: 4px solid #2196F3;
+            background: rgba(33, 150, 243, 0.08);
+            font-weight: 500;
+        }
+        
+        .log-entry.ai {
+            border-left: 4px solid #9C27B0;
+            background: rgba(156, 39, 176, 0.08);
+            font-weight: 500;
+        }
+        
+        .log-entry.error {
+            border-left: 4px solid #F44336;
+            background: rgba(244, 67, 54, 0.1);
+            font-weight: 600;
+        }
+        
+        .log-entry.warning {
+            border-left: 4px solid #FF9800;
+            background: rgba(255, 152, 0, 0.08);
+        }
+        
+        .log-entry.success {
+            border-left: 4px solid #4CAF50;
+            background: rgba(76, 175, 80, 0.08);
+        }
+        
+        .log-time {
+            color: #666;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .log-level {
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .log-level.INFO {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        
+        .log-level.WARNING, .log-level.WARN {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+        
+        .log-level.ERROR {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+        
+        .log-level.CRITICAL {
+            background: #ffebee;
+            color: #b71c1c;
+        }
+        
+        .log-message {
+            flex: 1;
+            margin-right: 10px;
+        }
+        
+        .log-module {
+            color: #888;
+            font-size: 0.8rem;
+            font-style: italic;
+        }
+        
+        /* Enhanced highlight animation for important logs */
+        .log-entry.startup.highlight,
+        .log-entry.trading.highlight,
+        .log-entry.ai.highlight {
+            animation: importantLogPulse 3s ease-out;
+        }
+        
+        @keyframes importantLogPulse {
+            0% {
+                background: rgba(255, 235, 59, 0.3);
+                transform: scale(1.02);
+            }
+            50% {
+                background: rgba(255, 235, 59, 0.15);
+            }
+            100% {
+                background: inherit;
+                transform: scale(1);
+            }
         }
 
         .startup-progress {
@@ -562,10 +727,12 @@
             const statusEl = document.getElementById('connectionStatus');
             if (connected) {
                 statusEl.className = 'connection-status connection-online';
-                statusEl.innerHTML = '<i class="fas fa-wifi"></i> Connected';
+                statusEl.innerHTML = '<i class="fas fa-wifi"></i> Live Logs Connected';
+                statusEl.title = 'Real-time log streaming active';
             } else {
                 statusEl.className = 'connection-status connection-offline';
-                statusEl.innerHTML = '<i class="fas fa-wifi"></i> Disconnected';
+                statusEl.innerHTML = '<i class="fas fa-wifi"></i> Live Logs Disconnected';
+                statusEl.title = 'Log streaming unavailable';
             }
         }
 
@@ -589,6 +756,10 @@
             updateLogs();
         }
 
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+        let reconnectDelay = 1000; // Start with 1 second
+        
         function initializeSSE() {
             try {
                 // Close existing connection if any
@@ -596,20 +767,35 @@
                     eventSource.close();
                 }
                 
+                console.log('Initializing SSE connection...');
                 eventSource = new EventSource('/api/logs/sse');
-                
+
                 eventSource.onopen = function() {
-                    console.log('SSE connection opened');
+                    console.log('SSE connection opened successfully');
                     updateConnectionStatus(true);
+                    reconnectAttempts = 0;
+                    reconnectDelay = 1000; // Reset delay
+                    showSuccess('Live logs connected');
                 };
 
                 eventSource.onmessage = function(event) {
                     try {
                         const logData = JSON.parse(event.data);
                         
-                        if (logData.type === 'heartbeat') {
-                            console.log('SSE heartbeat received');
+                        if (logData.type === 'connection') {
+                            console.log('SSE connection confirmed:', logData.message);
                             updateConnectionStatus(true);
+                            return;
+                        }
+                        
+                        if (logData.type === 'heartbeat') {
+                            console.log('SSE heartbeat received - Logs:', logData.logs_count, 'Bot:', logData.bot_status);
+                            updateConnectionStatus(true);
+                            // Update connection indicator with additional info
+                            const indicator = document.querySelector('.connection-status');
+                            if (indicator) {
+                                indicator.title = `Connected - ${logData.logs_count} logs, Bot: ${logData.bot_status}`;
+                            }
                             return;
                         }
                         
@@ -620,12 +806,12 @@
                         }
                         
                         // Only add valid log entries
-                        if (logData.message && logData.created) {
+                        if (logData.message && (logData.created || logData.timestamp)) {
                             addLogEntry(logData);
                             updateLogStats();
                         }
                     } catch (e) {
-                        console.error('Error parsing SSE data:', e, event.data);
+                        console.error('Error parsing SSE data:', e, 'Raw data:', event.data);
                     }
                 };
 
@@ -633,21 +819,35 @@
                     console.error('SSE connection error:', event);
                     updateConnectionStatus(false);
                     
-                    // Only attempt reconnect if connection was closed
-                    if (eventSource && eventSource.readyState === EventSource.CLOSED) {
-                        console.log('Attempting SSE reconnection in 5 seconds...');
+                    // Implement exponential backoff for reconnection
+                    if (reconnectAttempts < maxReconnectAttempts) {
+                        reconnectAttempts++;
+                        const delay = Math.min(reconnectDelay * Math.pow(2, reconnectAttempts - 1), 30000); // Max 30 seconds
+                        
+                        console.log(`Attempting SSE reconnection ${reconnectAttempts}/${maxReconnectAttempts} in ${delay/1000} seconds...`);
+                        showError(`Connection lost. Reconnecting in ${delay/1000}s... (${reconnectAttempts}/${maxReconnectAttempts})`);
+                        
                         setTimeout(() => {
-                            initializeSSE();
-                        }, 5000);
+                            if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+                                initializeSSE();
+                            }
+                        }, delay);
+                    } else {
+                        console.error('Max reconnection attempts reached. Please refresh the page.');
+                        showError('Connection failed. Please refresh the page to retry.');
                     }
                 };
             } catch (e) {
                 console.error('Failed to initialize SSE:', e);
                 updateConnectionStatus(false);
+                showError('Failed to initialize live logs connection');
+                
                 // Retry initialization after delay
-                setTimeout(() => {
-                    initializeSSE();
-                }, 10000);
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    setTimeout(() => {
+                        initializeSSE();
+                    }, 5000);
+                }
             }
         }
 
@@ -833,13 +1033,45 @@
             const entry = document.createElement('div');
             entry.className = `log-entry ${sanitize(log.category || 'general')}`;
             
-            // Apply category-specific styling
-            if (log.category === 'trading' || log.message.includes('trade') || log.message.includes('position')) {
+            // Enhanced category-specific styling with better detection
+            const message = log.message.toLowerCase();
+            const module = (log.module || '').toLowerCase();
+            
+            // Bot startup and initialization
+            if (message.includes('starting') || message.includes('initializing') || 
+                message.includes('startup') || message.includes('bot started') ||
+                message.includes('configuration loaded') || message.includes('connecting to')) {
+                entry.classList.add('startup');
+            }
+            // Trading and market analysis
+            else if (log.category === 'trading' || message.includes('trade') || 
+                     message.includes('position') || message.includes('market') ||
+                     message.includes('signal') || message.includes('analysis') ||
+                     message.includes('indicator') || message.includes('price')) {
                 entry.classList.add('trading');
-            } else if (log.category === 'ai' || log.message.includes('AI') || log.message.includes('sentiment')) {
+            }
+            // AI and sentiment analysis
+            else if (log.category === 'ai' || message.includes('ai') || 
+                     message.includes('sentiment') || message.includes('openrouter') ||
+                     message.includes('gpt') || message.includes('claude') ||
+                     module.includes('ai') || module.includes('sentiment')) {
                 entry.classList.add('ai');
-            } else if (log.level === 'ERROR' || log.level === 'CRITICAL') {
+            }
+            // Errors and critical issues
+            else if (log.level === 'ERROR' || log.level === 'CRITICAL' || 
+                     message.includes('error') || message.includes('failed') ||
+                     message.includes('exception')) {
                 entry.classList.add('error');
+            }
+            // Warnings
+            else if (log.level === 'WARNING' || log.level === 'WARN' || 
+                     message.includes('warning') || message.includes('warn')) {
+                entry.classList.add('warning');
+            }
+            // Success messages
+            else if (message.includes('success') || message.includes('completed') ||
+                     message.includes('connected') || message.includes('ready')) {
+                entry.classList.add('success');
             }
             
             entry.innerHTML = `
@@ -949,29 +1181,29 @@
         }
 
         function showError(message) {
-            const container = document.getElementById('errorContainer');
-            const errorDiv = document.createElement('div');
-            errorDiv.className = 'error-message';
-            errorDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${message}`;
-            container.appendChild(errorDiv);
+            const toast = document.createElement('div');
+            toast.className = 'toast toast-error';
+            toast.textContent = message;
+            document.body.appendChild(toast);
             
+            // Auto remove after 5 seconds
             setTimeout(() => {
-                if (errorDiv.parentNode) {
-                    errorDiv.parentNode.removeChild(errorDiv);
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
                 }
             }, 5000);
         }
 
         function showSuccess(message) {
-            const container = document.getElementById('errorContainer');
-            const successDiv = document.createElement('div');
-            successDiv.className = 'success-message';
-            successDiv.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
-            container.appendChild(successDiv);
+            const toast = document.createElement('div');
+            toast.className = 'toast toast-success';
+            toast.textContent = message;
+            document.body.appendChild(toast);
             
+            // Auto remove after 3 seconds
             setTimeout(() => {
-                if (successDiv.parentNode) {
-                    successDiv.parentNode.removeChild(successDiv);
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
                 }
             }, 3000);
         }

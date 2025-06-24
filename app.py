@@ -61,7 +61,8 @@ class WebLogHandler(logging.Handler):
                 'source': getattr(record, 'source', 'system'),
                 'created': record.created,
                 'thread_id': record.thread,
-                'process_id': record.process
+                'process_id': record.process,
+                'full_timestamp': datetime.fromtimestamp(record.created).isoformat()
             }
             
             # Add to recent logs with priority handling for important logs
@@ -93,7 +94,9 @@ class WebLogHandler(logging.Handler):
                 'connecting', 'ready', 'signal', 'strategy', 'analysis', 'ai', 'model', 
                 'prediction', 'sentiment', 'price', 'market', 'indicator', 'position',
                 'openrouter', 'claude', 'gpt', 'trade', 'order', 'balance', 'profit', 
-                'loss', 'buy', 'sell', 'executed', 'portfolio', 'grid'
+                'loss', 'buy', 'sell', 'executed', 'portfolio', 'grid', 'binance',
+                'api', 'connection', 'authenticated', 'websocket', 'stream', 'data',
+                'technical', 'rsi', 'macd', 'bollinger', 'ema', 'sma', 'volume'
             ]
             
             # Capture more logs as startup logs for better visibility
@@ -537,12 +540,15 @@ def sse_logs():
     """Stream logs in real-time with Server-Sent Events (SSE)"""
     def generate():
         try:
+            # Send initial connection confirmation
+            yield f"data: {json.dumps({'type': 'connection', 'message': 'SSE connected', 'timestamp': time.time()})}\n\n"
+            
             # Send initial logs
             last_timestamp = 0
             connection_start = time.time()
             
             # Initial data burst with recent logs
-            recent = sorted(recent_logs[-30:], key=lambda x: x.get('created', 0))
+            recent = sorted(recent_logs[-50:], key=lambda x: x.get('created', 0))
             for log in recent:
                 if log.get('created', 0) > last_timestamp:
                     last_timestamp = log.get('created', 0)
@@ -552,7 +558,8 @@ def sse_logs():
             # Keep connection open and stream new logs
             last_log_count = len(recent_logs)
             last_check = time.time()
-            max_connection_time = 3600  # 1 hour max connection
+            max_connection_time = 7200  # 2 hours max connection
+            heartbeat_interval = 10  # Send heartbeat every 10 seconds
             
             while time.time() - connection_start < max_connection_time:
                 try:
@@ -576,31 +583,47 @@ def sse_logs():
                         last_log_count = current_count
                         last_check = current_time
                     
-                    # Send heartbeat every 15 seconds if no new logs
-                    elif current_time - last_check > 15:
-                        yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': current_time})}\n\n"
+                    # Send heartbeat every 10 seconds if no new logs
+                    elif current_time - last_check > heartbeat_interval:
+                        heartbeat_data = {
+                            'type': 'heartbeat', 
+                            'timestamp': current_time,
+                            'logs_count': len(recent_logs),
+                            'bot_status': bot_stats.get('status', 'unknown')
+                        }
+                        yield f"data: {json.dumps(heartbeat_data)}\n\n"
                         last_check = current_time
                     
-                    time.sleep(0.5)  # Check for new logs every 500ms
+                    time.sleep(0.3)  # Check for new logs every 300ms
                     
                 except GeneratorExit:
+                    logging.info("SSE client disconnected")
                     break
                 except Exception as e:
                     logging.error(f"SSE stream error: {e}")
-                    yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                    yield f"data: {json.dumps({'type': 'error', 'message': str(e), 'timestamp': time.time()})}\n\n"
                     break
                     
         except Exception as e:
             logging.error(f"SSE initialization error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': 'SSE connection failed'})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': 'SSE connection failed', 'timestamp': time.time()})}\n\n"
     
     response = app.response_class(
         response=generate(),
         status=200,
         mimetype='text/event-stream'
     )
-    response.headers['Cache-Control'] = 'no-cache'
+    
+    # Enhanced headers for better SSE support
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
     response.headers['X-Accel-Buffering'] = 'no'  # Disable buffering for nginx
+    response.headers['Connection'] = 'keep-alive'
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET'
+    response.headers['Access-Control-Allow-Headers'] = 'Cache-Control'
+    
     return response
 
 @app.route('/health')
