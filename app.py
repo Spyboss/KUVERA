@@ -46,58 +46,135 @@ recent_logs = []
 max_logs = 200  # Increased for better log history
 
 class WebLogHandler(logging.Handler):
-    """Custom log handler to capture logs for web display"""
+    """Enhanced custom log handler to capture logs for web display"""
     def emit(self, record):
         global recent_logs, bot_startup_logs, bot_stats
         
         try:
+            # Create a more detailed log entry with additional metadata
             log_entry = {
                 'timestamp': datetime.fromtimestamp(record.created).strftime('%H:%M:%S.%f')[:-3],
                 'level': record.levelname,
-                'message': record.getMessage(),
+                'message': self._enhance_message(record.getMessage()),
                 'module': record.name,
-                'category': self._categorize_log(record.getMessage())
+                'category': self._categorize_log(record.getMessage()),
+                'source': getattr(record, 'source', 'system'),
+                'created': record.created,
+                'thread_id': record.thread,
+                'process_id': record.process
             }
             
-            # Add to recent logs
-            recent_logs.append(log_entry)
-            if len(recent_logs) > max_logs:
-                recent_logs.pop(0)
+            # Add to recent logs with priority handling for important logs
+            if log_entry['level'] in ['ERROR', 'CRITICAL'] or self._is_important_log(log_entry['message']):
+                # Insert important logs at the beginning to ensure they're not lost
+                recent_logs.insert(0, log_entry)
+            else:
+                recent_logs.append(log_entry)
+                
+            # Maintain max logs but keep important ones
+            while len(recent_logs) > max_logs:
+                # Find oldest non-important log to remove
+                for i, log in enumerate(recent_logs):
+                    if not (log['level'] in ['ERROR', 'CRITICAL'] or self._is_important_log(log['message'])):
+                        recent_logs.pop(i)
+                        break
+                else:
+                    # If all logs are important, remove oldest
+                    recent_logs.pop(-1)
             
-            # Track startup logs separately - Enhanced capture logic
+            # Track startup logs with enhanced capture logic
             current_time = datetime.now()
             time_since_start = (current_time - start_time).total_seconds()
             
-            # Always capture startup logs during first 120 seconds or when bot is starting/initializing
-            startup_keywords = ['starting', 'dashboard', 'flask', 'serving', 'kuvera', 'bot', 'trading', 'web', 'port', 'available', 'running', 'initializing', 'setup', 'loading', 'connecting', 'ready']
+            # Expanded keywords for better log capture
+            startup_keywords = [
+                'starting', 'dashboard', 'flask', 'serving', 'kuvera', 'bot', 'trading', 
+                'web', 'port', 'available', 'running', 'initializing', 'setup', 'loading', 
+                'connecting', 'ready', 'signal', 'strategy', 'analysis', 'ai', 'model', 
+                'prediction', 'sentiment', 'price', 'market', 'indicator', 'position',
+                'openrouter', 'claude', 'gpt', 'trade', 'order', 'balance', 'profit', 
+                'loss', 'buy', 'sell', 'executed', 'portfolio', 'grid'
+            ]
             
-            if (bot_stats['status'] in ['starting', 'initializing', 'preparing'] or 
-                time_since_start < 120 or  # Extended to 120 seconds for better capture
+            # Capture more logs as startup logs for better visibility
+            if (bot_stats['status'] in ['starting', 'initializing', 'preparing', 'running'] or 
+                time_since_start < 600 or  # Extended to 10 minutes for better capture
                 any(keyword in log_entry['message'].lower() for keyword in startup_keywords) or
-                record.levelname in ['INFO', 'WARNING', 'ERROR']):
+                log_entry['level'] in ['INFO', 'WARNING', 'ERROR', 'CRITICAL'] or
+                self._is_important_log(log_entry['message'])):
+                
                 bot_startup_logs.append(log_entry)
-                if len(bot_startup_logs) > 150:  # Increased to keep more startup logs
-                    bot_startup_logs.pop(0)
+                if len(bot_startup_logs) > 500:  # Significantly increased for better history
+                    # Remove oldest non-important logs first
+                    for i, log in enumerate(bot_startup_logs):
+                        if not (log['level'] in ['ERROR', 'CRITICAL'] or self._is_important_log(log['message'])):
+                            bot_startup_logs.pop(i)
+                            break
+                    else:
+                        # If all logs are important, remove oldest
+                        bot_startup_logs.pop(0)
+                        
+            # Print to console for debugging in development
+            if os.environ.get('FLASK_DEBUG', 'false').lower() == 'true':
+                print(f"[{log_entry['timestamp']}] {log_entry['level']} - {log_entry['message']}")
+                
         except Exception as e:
             # Fallback logging to prevent handler errors
             print(f"WebLogHandler error: {e}")
     
+    def _enhance_message(self, message):
+        """Add visual enhancements to log messages for better readability"""
+        # Add emoji indicators based on content
+        if any(kw in message.lower() for kw in ['error', 'failed', 'exception', 'critical']):
+            return f"❌ {message}"
+        elif any(kw in message.lower() for kw in ['warning', 'warn']):
+            return f"⚠️ {message}"
+        elif any(kw in message.lower() for kw in ['buy', 'long', 'purchase']):
+            return f"🟢 {message}"
+        elif any(kw in message.lower() for kw in ['sell', 'short']):
+            return f"🔴 {message}"
+        elif any(kw in message.lower() for kw in ['signal', 'indicator', 'strategy']):
+            return f"📊 {message}"
+        elif any(kw in message.lower() for kw in ['ai', 'ml', 'model', 'prediction', 'sentiment']):
+            return f"🤖 {message}"
+        elif any(kw in message.lower() for kw in ['starting', 'initializing', 'setup']):
+            return f"🚀 {message}"
+        elif any(kw in message.lower() for kw in ['ready', 'complete', 'success', 'finished']):
+            return f"✅ {message}"
+        else:
+            return message
+    
+    def _is_important_log(self, message):
+        """Determine if a log message is important and should be preserved"""
+        important_keywords = [
+            'signal', 'trade', 'position', 'order', 'buy', 'sell', 
+            'ai analysis', 'prediction', 'sentiment', 'model', 
+            'strategy', 'indicator', 'crossover', 'divergence',
+            'error', 'warning', 'critical', 'exception', 'failed'
+        ]
+        return any(keyword in message.lower() for keyword in important_keywords)
+    
     def _categorize_log(self, message):
-        """Categorize log messages for better filtering"""
+        """Enhanced categorization of log messages for better filtering"""
         message_lower = message.lower()
         
-        if any(keyword in message_lower for keyword in ['starting', 'initializing', 'loading', 'connecting']):
+        # More specific categorization with expanded keywords
+        if any(keyword in message_lower for keyword in ['starting', 'initializing', 'loading', 'connecting', 'setup', 'ready']):
             return 'startup'
-        elif any(keyword in message_lower for keyword in ['buy', 'sell', 'trade', 'order', 'position']):
+        elif any(keyword in message_lower for keyword in ['buy', 'sell', 'trade', 'order', 'position', 'entry', 'exit', 'stop', 'profit']):
             return 'trading'
-        elif any(keyword in message_lower for keyword in ['ai', 'ml', 'model', 'prediction', 'sentiment']):
+        elif any(keyword in message_lower for keyword in ['ai', 'ml', 'model', 'prediction', 'sentiment', 'analysis', 'confidence', 'score']):
             return 'ai'
-        elif any(keyword in message_lower for keyword in ['error', 'failed', 'exception', 'critical']):
+        elif any(keyword in message_lower for keyword in ['error', 'failed', 'exception', 'critical', 'crash', 'timeout']):
             return 'error'
-        elif any(keyword in message_lower for keyword in ['warning', 'warn']):
+        elif any(keyword in message_lower for keyword in ['warning', 'warn', 'caution', 'attention']):
             return 'warning'
-        elif any(keyword in message_lower for keyword in ['strategy', 'signal', 'indicator', 'analysis']):
+        elif any(keyword in message_lower for keyword in ['strategy', 'signal', 'indicator', 'analysis', 'pattern', 'trend', 'sma', 'ema', 'rsi', 'macd', 'bollinger']):
             return 'strategy'
+        elif any(keyword in message_lower for keyword in ['price', 'market', 'volume', 'volatility', 'momentum']):
+            return 'market'
+        elif any(keyword in message_lower for keyword in ['config', 'setting', 'parameter', 'option']):
+            return 'config'
         else:
             return 'general'
 
@@ -145,27 +222,89 @@ def get_status():
 
 @app.route('/api/logs')
 def get_logs():
-    """Get recent logs with optional filtering"""
+    """Get recent logs with enhanced filtering and sorting"""
     category = request.args.get('category', 'all')
-    limit = int(request.args.get('limit', 50))
+    limit = int(request.args.get('limit', 100))  # Increased default limit
     startup_only = request.args.get('startup', 'false').lower() == 'true'
+    level = request.args.get('level', 'all')  # Filter by log level
+    search = request.args.get('search', '').lower()  # Search term
+    sort_order = request.args.get('sort', 'desc').lower()  # asc or desc
+    since = request.args.get('since', None)  # Timestamp to get logs since
     
-    if startup_only:
-        logs_to_return = bot_startup_logs[-limit:]
-    elif category == 'all':
-        logs_to_return = recent_logs[-limit:]
+    # Select the log source
+    log_source = bot_startup_logs if startup_only else recent_logs
+    
+    # Apply filters
+    filtered_logs = log_source.copy()  # Create a copy to avoid modifying original
+    
+    # Filter by timestamp if specified (apply first for efficiency)
+    if since:
+        try:
+            since_ts = float(since)
+            filtered_logs = [log for log in filtered_logs if log.get('created', 0) > since_ts]
+        except (ValueError, TypeError):
+            logging.warning(f"Invalid since parameter: {since}")
+    
+    # Filter by category if specified
+    if category != 'all':
+        filtered_logs = [log for log in filtered_logs if log.get('category') == category]
+    
+    # Filter by level if specified
+    if level != 'all':
+        filtered_logs = [log for log in filtered_logs if log.get('level', '').lower() == level.lower()]
+    
+    # Filter by search term if specified
+    if search:
+        filtered_logs = [log for log in filtered_logs if search in log.get('message', '').lower() or 
+                         search in log.get('module', '').lower() or
+                         search in log.get('category', '').lower()]
+    
+    # Sort logs (always sort before applying limit)
+    if sort_order == 'asc':
+        sorted_logs = sorted(filtered_logs, key=lambda x: x.get('created', 0))
     else:
-        # Filter by category
-        filtered_logs = [log for log in recent_logs if log.get('category') == category]
-        logs_to_return = filtered_logs[-limit:]
+        sorted_logs = sorted(filtered_logs, key=lambda x: x.get('created', 0), reverse=True)
     
+    # Apply limit
+    if limit > 0:
+        logs_to_return = sorted_logs[:limit]
+    else:
+        logs_to_return = sorted_logs
+    
+    # Get available categories from recent logs
+    categories = list(set(log.get('category', 'general') for log in recent_logs))
+    categories.sort()  # Sort alphabetically
+    
+    # Get available log levels from recent logs
+    levels = list(set(log.get('level', 'INFO') for log in recent_logs))
+    levels.sort()  # Sort alphabetically
+    
+    # Count logs by category
+    category_counts = {}
+    for cat in categories:
+        category_counts[cat] = len([log for log in recent_logs if log.get('category') == cat])
+    
+    # Count logs by level
+    level_counts = {}
+    for lvl in levels:
+        level_counts[lvl] = len([log for log in recent_logs if log.get('level') == lvl])
+    
+    # Get latest timestamp for incremental updates
+    latest_timestamp = max([log.get('created', 0) for log in recent_logs]) if recent_logs else 0
+    
+    # Enhanced response with more metadata
     return jsonify({
         'logs': logs_to_return,
         'total_logs': len(recent_logs),
         'startup_logs': len(bot_startup_logs),
-        'categories': list(set(log.get('category', 'general') for log in recent_logs[-100:])),
+        'filtered_count': len(filtered_logs),
+        'categories': categories,
+        'category_counts': category_counts,
+        'levels': levels,
+        'level_counts': level_counts,
         'bot_status': bot_stats['status'],
-        'startup_stage': bot_stats.get('startup_stage', 'idle')
+        'startup_stage': bot_stats.get('startup_stage', 'idle'),
+        'latest_timestamp': latest_timestamp
     })
 
 @app.route('/api/trades')
@@ -356,6 +495,114 @@ def get_current_price():
         logging.error(f"Error getting price data: {e}")
         return jsonify({'error': 'Failed to get price data'}), 500
 
+@app.route('/api/logs/stream')
+def stream_logs():
+    """Get logs since a specific timestamp for real-time streaming"""
+    since = request.args.get('since', '0')
+    category = request.args.get('category', 'all')
+    level = request.args.get('level', 'all')
+    limit = int(request.args.get('limit', 50))
+    
+    try:
+        since_ts = float(since)
+    except (ValueError, TypeError):
+        since_ts = 0
+    
+    # Get logs newer than the specified timestamp
+    if category == 'all' and level == 'all':
+        new_logs = [log for log in recent_logs if log.get('created', 0) > since_ts]
+    else:
+        # Apply category and level filters
+        new_logs = [log for log in recent_logs 
+                   if log.get('created', 0) > since_ts and
+                   (category == 'all' or log.get('category') == category) and
+                   (level == 'all' or log.get('level', '').lower() == level.lower())]
+    
+    # Sort by timestamp (newest first) and limit
+    new_logs = sorted(new_logs, key=lambda x: x.get('created', 0), reverse=True)[:limit]
+    
+    # Get latest timestamp for next request
+    latest_timestamp = max([log.get('created', 0) for log in recent_logs]) if recent_logs else since_ts
+    
+    return jsonify({
+        'logs': new_logs,
+        'latest_timestamp': latest_timestamp,
+        'count': len(new_logs),
+        'bot_status': bot_stats['status'],
+        'startup_stage': bot_stats.get('startup_stage', 'idle')
+    })
+
+@app.route('/api/logs/sse')
+def sse_logs():
+    """Stream logs in real-time with Server-Sent Events (SSE)"""
+    def generate():
+        try:
+            # Send initial logs
+            last_timestamp = 0
+            connection_start = time.time()
+            
+            # Initial data burst with recent logs
+            recent = sorted(recent_logs[-30:], key=lambda x: x.get('created', 0))
+            for log in recent:
+                if log.get('created', 0) > last_timestamp:
+                    last_timestamp = log.get('created', 0)
+                    log_json = json.dumps(log)
+                    yield f"data: {log_json}\n\n"
+            
+            # Keep connection open and stream new logs
+            last_log_count = len(recent_logs)
+            last_check = time.time()
+            max_connection_time = 3600  # 1 hour max connection
+            
+            while time.time() - connection_start < max_connection_time:
+                try:
+                    # Check for new logs
+                    current_count = len(recent_logs)
+                    current_time = time.time()
+                    
+                    # If new logs have been added
+                    if current_count > last_log_count:
+                        # Find new logs since last timestamp
+                        new_logs = [log for log in recent_logs if log.get('created', 0) > last_timestamp]
+                        new_logs.sort(key=lambda x: x.get('created', 0))
+                        
+                        # Send each new log
+                        for log in new_logs:
+                            if log.get('created', 0) > last_timestamp:
+                                last_timestamp = log.get('created', 0)
+                                log_json = json.dumps(log)
+                                yield f"data: {log_json}\n\n"
+                        
+                        last_log_count = current_count
+                        last_check = current_time
+                    
+                    # Send heartbeat every 15 seconds if no new logs
+                    elif current_time - last_check > 15:
+                        yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': current_time})}\n\n"
+                        last_check = current_time
+                    
+                    time.sleep(0.5)  # Check for new logs every 500ms
+                    
+                except GeneratorExit:
+                    break
+                except Exception as e:
+                    logging.error(f"SSE stream error: {e}")
+                    yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                    break
+                    
+        except Exception as e:
+            logging.error(f"SSE initialization error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'SSE connection failed'})}\n\n"
+    
+    response = app.response_class(
+        response=generate(),
+        status=200,
+        mimetype='text/event-stream'
+    )
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'  # Disable buffering for nginx
+    return response
+
 @app.route('/health')
 def health_check():
     """Health check endpoint for Railway"""
@@ -364,7 +611,7 @@ def health_check():
         'timestamp': datetime.now().isoformat(),
         'bot_status': bot_stats['status'],
         'uptime': bot_stats['uptime'],
-        'version': '1.1'
+        'version': '1.2'  # Updated version number
     })
 
 def run_bot_in_background():
