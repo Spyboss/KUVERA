@@ -215,6 +215,69 @@
 .category-badge.config { background-color: #795548; color: white; }
 .category-badge.general { background-color: #9E9E9E; color: white; }
 
+/* Button state styles */
+.btn-processing {
+    opacity: 0.7;
+    pointer-events: none;
+    position: relative;
+}
+
+.btn-processing::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
+    border: 2px solid transparent;
+    border-top: 2px solid currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.btn-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Enhanced connection status */
+.connection-status {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+    transition: all 0.3s ease;
+}
+
+.connection-status.connected {
+    background-color: #4CAF50;
+    box-shadow: 0 0 8px rgba(76, 175, 80, 0.5);
+    animation: pulse-green 2s infinite;
+}
+
+.connection-status.disconnected {
+    background-color: #F44336;
+    box-shadow: 0 0 8px rgba(244, 67, 54, 0.5);
+    animation: pulse-red 2s infinite;
+}
+
+@keyframes pulse-green {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+@keyframes pulse-red {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
 /* Stream Status */
 .stream-status {
     display: flex;

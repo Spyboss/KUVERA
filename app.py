@@ -17,8 +17,15 @@ from typing import Dict, List, Optional
 # Import your existing bot components
 try:
     from bot import EnhancedTradingBot  # Your main bot class
-except ImportError:
-    EnhancedTradingBot = None
+except ImportError as e:
+    logging.warning(f"Could not import EnhancedTradingBot: {e}")
+    logging.info("Falling back to WorkingTradingBot...")
+    try:
+        from working_trading_bot import WorkingTradingBot as EnhancedTradingBot
+        logging.info("✅ Successfully imported WorkingTradingBot as fallback")
+    except ImportError as e2:
+        logging.error(f"Could not import WorkingTradingBot either: {e2}")
+        EnhancedTradingBot = None
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')

@@ -1888,6 +1888,47 @@ class EnhancedTradingBot:
             
         except Exception as e:
             self.logger.error(f"Kline error: {e}")
+    
+    def handle_websocket_error(self, ws, error):
+        """Handle WebSocket errors with reconnection logic"""
+        self.logger.error(f"WebSocket error: {error}")
+        
+        # Don't attempt reconnection if bot is stopping
+        if not self.is_running:
+            return
+            
+        # Schedule reconnection after a delay
+        threading.Timer(5.0, self.reconnect_websocket).start()
+    
+    def handle_websocket_close(self, ws):
+        """Handle WebSocket connection close"""
+        self.logger.warning("WebSocket connection closed")
+        
+        # Don't attempt reconnection if bot is stopping
+        if not self.is_running:
+            return
+            
+        # Schedule reconnection after a delay
+        threading.Timer(3.0, self.reconnect_websocket).start()
+    
+    def reconnect_websocket(self):
+        """Attempt to reconnect WebSocket"""
+        if not self.is_running:
+            return
+            
+        self.logger.info("Attempting to reconnect WebSocket...")
+        
+        try:
+            # Use asyncio to run the async start_websocket method
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self.start_websocket())
+            loop.close()
+        except Exception as e:
+            self.logger.error(f"WebSocket reconnection failed: {e}")
+            # Try again after longer delay
+            if self.is_running:
+                threading.Timer(10.0, self.reconnect_websocket).start()
             
     async def process_enhanced_signals(self, current_price: float, indicators: Dict[str, float]):
         """Process enhanced trading signals with AI integration, trailing stops, and active trading check"""
@@ -2626,10 +2667,19 @@ class EnhancedTradingBot:
             return 0
             
     async def start_websocket(self):
-        """Start WebSocket connection"""
+        """Start WebSocket connection with error handling"""
         try:
+            # Stop existing connection if any
+            if hasattr(self, 'ws_client') and self.ws_client:
+                try:
+                    self.ws_client.stop()
+                except:
+                    pass
+            
             self.ws_client = SpotWebsocketStreamClient(
                 on_message=self.handle_kline_data,
+                on_error=self.handle_websocket_error,
+                on_close=self.handle_websocket_close,
                 is_combined=True
             )
             
@@ -2638,6 +2688,8 @@ class EnhancedTradingBot:
             
         except Exception as e:
             self.logger.error(f"WebSocket error: {e}")
+            # Continue without WebSocket - use polling instead
+            self.ws_client = None
             
     # run_with_ui method removed - bot now runs in automated mode only
         

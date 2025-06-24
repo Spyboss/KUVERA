@@ -52,17 +52,35 @@
 
         .card {
             background: rgba(255, 255, 255, 0.95);
-            border-radius: 15px;
+            border-radius: 20px;
             padding: 25px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.2);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255,255,255,0.3);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, #667eea, #764ba2, #f093fb);
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
         }
 
         .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.12);
+        }
+        
+        .card:hover::before {
+            transform: scaleX(1);
         }
 
         .card-header {
@@ -160,12 +178,41 @@
             flex: 1;
             padding: 12px 20px;
             border: none;
-            border-radius: 8px;
+            border-radius: 12px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            transform: translateY(0);
+        }
+        
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+        }
+        
+        .btn:hover::before {
+            left: 100%;
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         }
 
         .btn-start {
@@ -192,6 +239,35 @@
             opacity: 0.6;
             cursor: not-allowed;
             transform: none;
+        }
+        
+        .btn-loading {
+            position: relative;
+            pointer-events: none;
+        }
+        
+        .btn-loading::after {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            top: 50%;
+            left: 50%;
+            margin-left: -8px;
+            margin-top: -8px;
+            border: 2px solid transparent;
+            border-top: 2px solid currentColor;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        .btn-loading span {
+            opacity: 0;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
 
         .logs-section {
@@ -257,6 +333,44 @@
             border-radius: 6px;
             font-size: 0.9rem;
             color: #666;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: #f8f9fa;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+        
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ffc107;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.connected {
+            background: #28a745;
+            animation: none;
+        }
+        
+        .status-indicator.disconnected {
+            background: #dc3545;
+            animation: blink 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
         }
 
         .trades-table {
@@ -668,6 +782,10 @@
                 <div class="logs-title">
                     <i class="fas fa-terminal"></i>
                     <span>Live Logs</span>
+                    <div class="connection-status" id="connectionStatus">
+                        <div class="status-indicator" id="statusIndicator"></div>
+                        <span id="statusText">Connecting...</span>
+                    </div>
                     <span id="logCount" class="log-stat">0 logs</span>
                 </div>
                 <div class="logs-controls">
@@ -714,25 +832,111 @@
         let updateInterval;
         let logUpdateInterval;
         let eventSource;
+        let reconnectAttempts = 0;
+        let maxReconnectAttempts = 10;
+        let reconnectDelay = 2000;
+        let buttonCooldown = false;
+        let lastStatusUpdate = 0;
+        let connectionRetryTimeout = null;
+        let isInitialized = false;
+        let statusUpdateInProgress = false;
+        let logsUpdateInProgress = false;
+        let botControlInProgress = false;
+        let forceRefreshTimer = null;
+        let lastSuccessfulUpdate = Date.now();
+        let connectionHealthCheck = null;
 
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Dashboard initializing...');
+            
+            // Prevent multiple initializations
+            if (isInitialized) {
+                console.log('⚠️ Dashboard already initialized');
+                return;
+            }
+            
             updateConnectionStatus(false);
             startDataUpdates();
-            initializeSSE();
+            
+            // Initialize SSE with delay to ensure page is fully loaded
+            setTimeout(() => {
+                initializeSSE();
+            }, 1000);
+            
+            // Add refresh button functionality
+            const refreshBtn = document.createElement('button');
+            refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
+            refreshBtn.className = 'btn btn-refresh';
+            refreshBtn.style.cssText = 'background: linear-gradient(45deg, #2196F3, #1976D2); color: white; margin-left: 10px;';
+            refreshBtn.addEventListener('click', () => {
+                showSuccess('Refreshing dashboard...');
+                setTimeout(() => location.reload(), 500);
+            });
+            const controlButtons = document.querySelector('.control-buttons');
+            if (controlButtons) {
+                controlButtons.appendChild(refreshBtn);
+            }
+            
+            // Add keyboard shortcuts
+            document.addEventListener('keydown', function(e) {
+                if (e.ctrlKey && e.key === 'r') {
+                    e.preventDefault();
+                    location.reload();
+                }
+            });
+            
+            // Start connection health monitoring
+            startConnectionHealthCheck();
+            
+            // Auto-refresh if no updates for too long
+            startForceRefreshTimer();
+            
+            isInitialized = true;
+            console.log('✅ Dashboard initialized successfully');
         });
 
         function updateConnectionStatus(connected) {
             isConnected = connected;
-            const statusEl = document.getElementById('connectionStatus');
+            const statusTextEl = document.getElementById('statusText');
+            const indicatorEl = document.getElementById('statusIndicator');
+            
+            if (!statusTextEl || !indicatorEl) {
+                console.warn('Connection status elements not found');
+                return;
+            }
+            
             if (connected) {
-                statusEl.className = 'connection-status connection-online';
-                statusEl.innerHTML = '<i class="fas fa-wifi"></i> Live Logs Connected';
-                statusEl.title = 'Real-time log streaming active';
+                // Update text status
+                statusTextEl.textContent = 'Connected';
+                statusTextEl.style.color = '#28a745';
+                
+                // Update indicator
+                indicatorEl.className = 'status-indicator connected';
+                indicatorEl.title = 'Connected to live log stream';
+                
+                // Update log container status
+                const logContainer = document.querySelector('.logs-container');
+                if (logContainer) {
+                    logContainer.classList.remove('disconnected');
+                }
+                
+                // Show success toast
+                showToast('Live logs connected successfully!', 'success');
             } else {
-                statusEl.className = 'connection-status connection-offline';
-                statusEl.innerHTML = '<i class="fas fa-wifi"></i> Live Logs Disconnected';
-                statusEl.title = 'Log streaming unavailable';
+                // Update text status
+                statusTextEl.textContent = 'Disconnected';
+                statusTextEl.style.color = '#dc3545';
+                
+                // Update indicator
+                indicatorEl.className = 'status-indicator disconnected';
+                indicatorEl.title = 'Disconnected from live log stream';
+                
+                // Update log container status
+                const logContainer = document.querySelector('.logs-container');
+                if (logContainer) {
+                    logContainer.classList.add('disconnected');
+                }
             }
         }
 
@@ -756,26 +960,48 @@
             updateLogs();
         }
 
-        let reconnectAttempts = 0;
-        const maxReconnectAttempts = 10;
-        let reconnectDelay = 1000; // Start with 1 second
-        
         function initializeSSE() {
             try {
-                // Close existing connection if any
-                if (eventSource) {
-                    eventSource.close();
+                // Set connecting status
+                const statusTextEl = document.getElementById('statusText');
+                const indicatorEl = document.getElementById('statusIndicator');
+                if (statusTextEl && indicatorEl) {
+                    statusTextEl.textContent = 'Connecting...';
+                    statusTextEl.style.color = '#ffc107';
+                    indicatorEl.className = 'status-indicator';
                 }
                 
-                console.log('Initializing SSE connection...');
+                // Close existing connection if any
+                if (eventSource) {
+                    console.log('Closing existing SSE connection...');
+                    eventSource.close();
+                    eventSource = null;
+                }
+                
+                console.log(`Initializing SSE connection (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})...`);
+                
+                // Add timeout for connection attempt
+                const connectionTimeout = setTimeout(() => {
+                    if (eventSource && eventSource.readyState === EventSource.CONNECTING) {
+                        console.warn('SSE connection timeout, closing and retrying...');
+                        eventSource.close();
+                        handleSSEError('Connection timeout');
+                    }
+                }, 10000); // 10 second timeout
+                
                 eventSource = new EventSource('/api/logs/sse');
 
                 eventSource.onopen = function() {
-                    console.log('SSE connection opened successfully');
+                    clearTimeout(connectionTimeout);
+                    console.log('✅ SSE connection opened successfully');
                     updateConnectionStatus(true);
                     reconnectAttempts = 0;
-                    reconnectDelay = 1000; // Reset delay
-                    showSuccess('Live logs connected');
+                    reconnectDelay = 2000; // Reset delay
+                    
+                    // Show success message only on first connection or after reconnection
+                    if (reconnectAttempts > 0 || !isConnected) {
+                        showSuccess('Live logs connected');
+                    }
                 };
 
                 eventSource.onmessage = function(event) {
@@ -789,7 +1015,6 @@
                         }
                         
                         if (logData.type === 'heartbeat') {
-                            console.log('SSE heartbeat received - Logs:', logData.logs_count, 'Bot:', logData.bot_status);
                             updateConnectionStatus(true);
                             // Update connection indicator with additional info
                             const indicator = document.querySelector('.connection-status');
@@ -816,87 +1041,159 @@
                 };
 
                 eventSource.onerror = function(event) {
+                    clearTimeout(connectionTimeout);
                     console.error('SSE connection error:', event);
-                    updateConnectionStatus(false);
-                    
-                    // Implement exponential backoff for reconnection
-                    if (reconnectAttempts < maxReconnectAttempts) {
-                        reconnectAttempts++;
-                        const delay = Math.min(reconnectDelay * Math.pow(2, reconnectAttempts - 1), 30000); // Max 30 seconds
-                        
-                        console.log(`Attempting SSE reconnection ${reconnectAttempts}/${maxReconnectAttempts} in ${delay/1000} seconds...`);
-                        showError(`Connection lost. Reconnecting in ${delay/1000}s... (${reconnectAttempts}/${maxReconnectAttempts})`);
-                        
-                        setTimeout(() => {
-                            if (eventSource && eventSource.readyState === EventSource.CLOSED) {
-                                initializeSSE();
-                            }
-                        }, delay);
-                    } else {
-                        console.error('Max reconnection attempts reached. Please refresh the page.');
-                        showError('Connection failed. Please refresh the page to retry.');
-                    }
+                    handleSSEError('Connection error');
                 };
+                
             } catch (e) {
                 console.error('Failed to initialize SSE:', e);
-                updateConnectionStatus(false);
-                showError('Failed to initialize live logs connection');
-                
-                // Retry initialization after delay
-                if (reconnectAttempts < maxReconnectAttempts) {
-                    setTimeout(() => {
-                        initializeSSE();
-                    }, 5000);
-                }
+                handleSSEError('Initialization failed: ' + e.message);
             }
+        }
+        
+        function handleSSEError(errorMessage) {
+            updateConnectionStatus(false);
+            
+            if (reconnectAttempts < maxReconnectAttempts) {
+                reconnectAttempts++;
+                const delay = Math.min(reconnectDelay * reconnectAttempts, 15000); // Max 15 seconds
+                
+                console.log(`SSE reconnection ${reconnectAttempts}/${maxReconnectAttempts} in ${delay/1000}s... (${errorMessage})`);
+                
+                // Only show error message for first few attempts
+                if (reconnectAttempts <= 3) {
+                    showError(`Connection lost. Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`);
+                }
+                
+                connectionRetryTimeout = setTimeout(() => {
+                    if (!isConnected) {
+                        initializeSSE();
+                    }
+                }, delay);
+            } else {
+                console.error('Max SSE reconnection attempts reached');
+                showError('Live logs connection failed. Using fallback polling.');
+                
+                // Fall back to polling if SSE fails completely
+                startPollingFallback();
+            }
+        }
+        
+        function startPollingFallback() {
+            console.log('Starting polling fallback for logs...');
+            
+            // Clear any existing SSE
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            
+            // Use more frequent polling as fallback
+            if (logUpdateInterval) {
+                clearInterval(logUpdateInterval);
+            }
+            
+            logUpdateInterval = setInterval(() => {
+                if (!logsUpdateInProgress) {
+                    updateLogs();
+                }
+            }, 2000); // Poll every 2 seconds
         }
 
         async function updateStatus() {
+            if (statusUpdateInProgress) {
+                console.log('Status update already in progress, skipping...');
+                return;
+            }
+            
+            statusUpdateInProgress = true;
+            
             try {
-                const response = await fetch('/api/status');
-                if (!response.ok) throw new Error('Failed to fetch status');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+                
+                const response = await fetch('/api/status', {
+                    signal: controller.signal,
+                    cache: 'no-cache',
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    }
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
                 
                 const data = await response.json();
-                updateConnectionStatus(true);
+                lastSuccessfulUpdate = Date.now();
                 
-                // Update bot status
+                // Update bot status with better error handling
                 const statusEl = document.getElementById('botStatus');
-                const status = data.status || 'unknown';
-                const statusClass = `status-${status}`;
-                statusEl.innerHTML = `<span class="status-indicator ${statusClass}"></span>${status.charAt(0).toUpperCase() + status.slice(1)}`;
+                if (statusEl) {
+                    const status = data.status || 'unknown';
+                    const statusClass = `status-${status}`;
+                    statusEl.innerHTML = `<span class="status-indicator ${statusClass}"></span>${status.charAt(0).toUpperCase() + status.slice(1)}`;
+                }
                 
-                // Update metrics
-                document.getElementById('uptime').textContent = data.uptime || '0:00:00';
-                document.getElementById('lastUpdate').textContent = new Date(data.last_update).toLocaleTimeString() || 'Never';
-                document.getElementById('balance').textContent = `$${(data.balance || 0).toFixed(2)}`;
+                // Update metrics with null checks
+                const safeUpdate = (id, value, formatter = (v) => v) => {
+                    const el = document.getElementById(id);
+                    if (el) el.textContent = formatter(value);
+                };
                 
+                safeUpdate('uptime', data.uptime || '0:00:00');
+                safeUpdate('lastUpdate', data.last_update ? new Date(data.last_update).toLocaleTimeString() : 'Never');
+                safeUpdate('balance', data.balance || 0, (v) => `$${v.toFixed(2)}`);
+                safeUpdate('totalTrades', data.total_trades || 0);
+                safeUpdate('winRate', data.win_rate || 0, (v) => `${v.toFixed(1)}%`);
+                safeUpdate('todayTrades', data.trades_today || 0);
+                
+                // Update P&L with color coding
                 const pnl = data.profit_loss || 0;
                 const pnlEl = document.getElementById('profitLoss');
-                pnlEl.textContent = `$${pnl.toFixed(2)}`;
-                pnlEl.className = `metric-value ${pnl >= 0 ? 'positive' : 'negative'}`;
-                
-                document.getElementById('totalTrades').textContent = data.total_trades || 0;
-                document.getElementById('winRate').textContent = `${(data.win_rate || 0).toFixed(1)}%`;
-                document.getElementById('todayTrades').textContent = data.trades_today || 0;
+                if (pnlEl) {
+                    pnlEl.textContent = `$${pnl.toFixed(2)}`;
+                    pnlEl.className = `metric-value ${pnl >= 0 ? 'positive' : 'negative'}`;
+                }
                 
                 // Update startup progress
                 const progressContainer = document.getElementById('startupProgress');
-                if (status === 'starting' || status === 'initializing') {
-                    progressContainer.style.display = 'block';
-                    const progress = data.startup_progress || 0;
-                    document.getElementById('progressFill').style.width = `${progress}%`;
-                    document.getElementById('progressText').textContent = data.startup_stage || 'Initializing...';
-                } else {
-                    progressContainer.style.display = 'none';
+                if (progressContainer) {
+                    const status = data.status || 'unknown';
+                    if (status === 'starting' || status === 'initializing') {
+                        progressContainer.style.display = 'block';
+                        const progress = data.startup_progress || 0;
+                        const progressFill = document.getElementById('progressFill');
+                        const progressText = document.getElementById('progressText');
+                        if (progressFill) progressFill.style.width = `${progress}%`;
+                        if (progressText) progressText.textContent = data.startup_stage || 'Initializing...';
+                    } else {
+                        progressContainer.style.display = 'none';
+                    }
                 }
                 
                 // Update button states
-                updateButtonStates(status);
+                updateButtonStates(data.status || 'unknown');
                 
             } catch (error) {
                 console.error('Error updating status:', error);
-                updateConnectionStatus(false);
-                showError('Error updating dashboard data');
+                
+                // Only show error if it's been a while since last successful update
+                const timeSinceLastUpdate = Date.now() - lastSuccessfulUpdate;
+                if (timeSinceLastUpdate > 30000) { // 30 seconds
+                    showError(`Connection issue: ${error.message}`);
+                }
+                
+                // Update connection status but don't spam errors
+                if (timeSinceLastUpdate > 10000) { // 10 seconds
+                    updateConnectionStatus(false);
+                }
+            } finally {
+                statusUpdateInProgress = false;
             }
         }
 
@@ -905,19 +1202,79 @@
             const stopBtn = document.getElementById('stopBtn');
             const restartBtn = document.getElementById('restartBtn');
             
+            if (!startBtn || !stopBtn || !restartBtn) {
+                console.warn('Button elements not found for updateButtonStates');
+                return;
+            }
+            
+            // Remove any processing classes
+            startBtn.classList.remove('btn-processing');
+            stopBtn.classList.remove('btn-processing');
+            restartBtn.classList.remove('btn-processing');
+            
+            // If control operation is in progress, disable all buttons
+            if (botControlInProgress) {
+                startBtn.disabled = true;
+                stopBtn.disabled = true;
+                restartBtn.disabled = true;
+                return;
+            }
+            
+            // Adjust based on bot status
             if (status === 'running') {
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
                 restartBtn.disabled = false;
-            } else if (status === 'starting' || status === 'stopping' || status === 'restarting') {
+                
+                // Update button appearance
+                startBtn.classList.add('btn-disabled');
+                stopBtn.classList.remove('btn-disabled');
+                restartBtn.classList.remove('btn-disabled');
+            } else if (status === 'starting') {
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                restartBtn.disabled = true;
+                
+                // Update button appearance
+                startBtn.classList.add('btn-processing');
+                stopBtn.classList.remove('btn-disabled');
+                restartBtn.classList.add('btn-disabled');
+            } else if (status === 'stopping') {
                 startBtn.disabled = true;
                 stopBtn.disabled = true;
                 restartBtn.disabled = true;
+                
+                // Update button appearance
+                startBtn.classList.add('btn-disabled');
+                stopBtn.classList.add('btn-processing');
+                restartBtn.classList.add('btn-disabled');
+            } else if (status === 'restarting') {
+                startBtn.disabled = true;
+                stopBtn.disabled = true;
+                restartBtn.disabled = true;
+                
+                // Update button appearance
+                startBtn.classList.add('btn-disabled');
+                stopBtn.classList.add('btn-disabled');
+                restartBtn.classList.add('btn-processing');
+            } else if (status === 'error') {
+                // In error state, allow all operations
+                startBtn.disabled = false;
+                stopBtn.disabled = false;
+                restartBtn.disabled = false;
             } else {
+                // Default to stopped state
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
                 restartBtn.disabled = false;
+                
+                // Update button appearance
+                startBtn.classList.remove('btn-disabled');
+                stopBtn.classList.add('btn-disabled');
+                restartBtn.classList.remove('btn-disabled');
             }
+            
+            console.log(`Button states updated for bot status: ${status}`);
         }
 
         async function updateTrades() {
@@ -962,9 +1319,18 @@
         }
 
         async function updateLogs() {
+            if (logsUpdateInProgress) {
+                console.log('Logs update already in progress, skipping...');
+                return;
+            }
+            
+            logsUpdateInProgress = true;
+            
             try {
-                const category = document.getElementById('categoryFilter').value;
-                const level = document.getElementById('levelFilter').value;
+                const category = document.getElementById('categoryFilter')?.value || 'all';
+                const level = document.getElementById('levelFilter')?.value || 'all';
+                const search = document.getElementById('searchFilter')?.value || '';
+                const startupOnly = document.getElementById('startupOnlyFilter')?.checked || false;
                 
                 const params = new URLSearchParams({
                     since: lastLogTimestamp.toString(),
@@ -973,23 +1339,63 @@
                     limit: '50'
                 });
                 
-                const response = await fetch(`/api/logs/stream?${params}`);
-                if (!response.ok) throw new Error('Failed to fetch logs');
+                if (search) {
+                    params.append('search', search);
+                }
+                if (startupOnly) {
+                    params.append('startup_only', 'true');
+                }
+                
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+                
+                const response = await fetch(`/api/logs/stream?${params}`, {
+                    signal: controller.signal,
+                    cache: 'no-cache',
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    }
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
                 
                 const data = await response.json();
                 
-                if (data.logs && data.logs.length > 0) {
-                    data.logs.forEach(log => addLogEntry(log));
-                    lastLogTimestamp = data.latest_timestamp;
+                if (data.logs && Array.isArray(data.logs) && data.logs.length > 0) {
+                    data.logs.forEach(log => {
+                        if (log && typeof log === 'object') {
+                            addLogEntry(log);
+                        }
+                    });
+                    lastLogTimestamp = data.latest_timestamp || lastLogTimestamp;
+                    
+                    // Remove loading message if logs are successfully loaded
+                    const container = document.getElementById('logsContainer');
+                    const loading = container?.querySelector('.loading, .error-message');
+                    if (loading && data.logs.length > 0) {
+                        loading.remove();
+                    }
                 }
                 
                 updateLogStats(data);
                 
             } catch (error) {
                 console.error('Error updating logs:', error);
-                if (document.getElementById('logsContainer').children.length === 1) {
-                    document.getElementById('logsContainer').innerHTML = '<div class="error-message">Error loading logs</div>';
+                
+                // Only show error if SSE is not connected and it's been a while
+                if (!sseConnected && Date.now() - lastSuccessfulUpdate > 15000) {
+                    const container = document.getElementById('logsContainer');
+                    if (container && container.children.length <= 1) {
+                        container.innerHTML = `<div class="error-message">Connection issue: ${error.message}</div>`;
+                    }
                 }
+            } finally {
+                logsUpdateInProgress = false;
             }
         }
 
@@ -1156,27 +1562,137 @@
         }
 
         async function controlBot(action) {
+            // Prevent multiple simultaneous requests
+            if (botControlInProgress) {
+                console.log('Bot control already in progress, ignoring action:', action);
+                showError(`Please wait, another bot operation is in progress`);
+                return;
+            }
+            
+            // Prevent rapid clicking
+            if (buttonCooldown) {
+                console.log('Button on cooldown, ignoring action:', action);
+                return;
+            }
+            
+            // Set flags to prevent multiple requests
+            botControlInProgress = true;
+            buttonCooldown = true;
+            
+            // Set cooldown timer
+            setTimeout(() => { buttonCooldown = false; }, 3000); // 3 second cooldown
+            
+            // Update button states
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const restartBtn = document.getElementById('restartBtn');
+            
+            if (startBtn) startBtn.disabled = true;
+            if (stopBtn) stopBtn.disabled = true;
+            if (restartBtn) restartBtn.disabled = true;
+            
+            // Show loading state
+            const actionBtn = document.getElementById(`${action}Btn`);
+            const originalText = actionBtn ? actionBtn.innerHTML : '';
+            if (actionBtn) {
+                actionBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${action.charAt(0).toUpperCase() + action.slice(1)}ing...`;
+                actionBtn.classList.add('btn-processing');
+            }
+            
+            console.log(`Sending ${action} request to bot...`);
+            
             try {
                 const response = await fetch(`/api/control/${action}`, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'Cache-Control': 'no-cache'
                     }
                 });
                 
-                const data = await response.json();
-                
-                if (data.success) {
-                    showSuccess(data.message);
-                    // Update status immediately
-                    setTimeout(updateStatus, 500);
-                } else {
-                    showError(data.message);
+                if (!response.ok) {
+                    throw new Error(`Server returned ${response.status}: ${response.statusText}`);
                 }
                 
+                const data = await response.json();
+                console.log('Bot control response:', data);
+                
+                // Reset button text
+                if (actionBtn) {
+                    actionBtn.innerHTML = originalText;
+                    actionBtn.classList.remove('btn-processing');
+                }
+                
+                // Handle response
+                if (data.success) {
+                    showSuccess(data.message || `Bot ${action} successful`);
+                    
+                    // Update status immediately
+                    setTimeout(updateStatus, 500);
+                    
+                    // Update logs to show startup/shutdown messages
+                    updateLogs();
+                    
+                    // For start/restart actions, poll more frequently initially
+                    if (action === 'start' || action === 'restart') {
+                        const quickUpdateInterval = setInterval(() => {
+                            if (!logsUpdateInProgress) {
+                                updateLogs();
+                            }
+                        }, 1000);
+                        
+                        // Return to normal polling after 10 seconds
+                        setTimeout(() => {
+                            clearInterval(quickUpdateInterval);
+                        }, 10000);
+                    }
+                } else {
+                    showError(data.message || `Failed to ${action} bot`);
+                }
+                
+                // Re-enable buttons after a short delay
+                setTimeout(() => {
+                    updateButtonStates();
+                    botControlInProgress = false;
+                }, 1000);
+                
             } catch (error) {
-                console.error('Error controlling bot:', error);
-                showError('Failed to control bot');
+                console.error(`Error ${action}ing bot:`, error);
+                showError(`Error ${action}ing bot: ${error.message || 'Connection failed'}`);
+                
+                // Reset button text
+                if (actionBtn) {
+                    actionBtn.innerHTML = originalText;
+                    actionBtn.classList.remove('btn-processing');
+                }
+                
+                // Re-enable buttons
+                updateButtonStates();
+                botControlInProgress = false;
+            }
+        }
+
+        async function controlBotWithFeedback(action) {
+            if (buttonCooldown) return;
+            
+            buttonCooldown = true;
+            const actionBtn = document.getElementById(action + 'Btn');
+            const originalText = actionBtn.innerHTML;
+            
+            try {
+                // Show loading state
+                actionBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + action.charAt(0).toUpperCase() + action.slice(1) + 'ing...';
+                actionBtn.disabled = true;
+                
+                await controlBot(action);
+                
+            } finally {
+                // Reset button after delay
+                setTimeout(() => {
+                    actionBtn.innerHTML = originalText;
+                    buttonCooldown = false;
+                    updateButtonStates(); // Update based on current status
+                }, 2000);
             }
         }
 
