@@ -1724,6 +1724,33 @@
             }, 3000);
         }
 
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            // Auto remove after 4 seconds
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            }, 4000);
+        }
+
+        function startConnectionHealthCheck() {
+            // Check connection health every 30 seconds
+            setInterval(() => {
+                if (!isConnected) {
+                    console.warn('⚠️ Connection lost, attempting to reconnect...');
+                    // Try to reinitialize SSE connection
+                    if (eventSource && eventSource.readyState !== EventSource.OPEN) {
+                        initializeSSE();
+                    }
+                }
+            }, 30000);
+        }
+
         // Cleanup on page unload
         window.addEventListener('beforeunload', function() {
             if (eventSource) {
