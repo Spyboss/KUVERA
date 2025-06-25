@@ -453,46 +453,7 @@
             box-shadow: 0 2px 4px rgba(244, 67, 54, 0.3);
         }
 
-        /* Toast Notifications */
-        .toast {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 12px 20px;
-            border-radius: 8px;
-            color: white;
-            font-weight: 500;
-            z-index: 10000;
-            max-width: 400px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            animation: slideInRight 0.3s ease-out;
-        }
-
-        .toast-success {
-            background: linear-gradient(135deg, #4CAF50, #45a049);
-            border-left: 4px solid #2e7d32;
-        }
-
-        .toast-error {
-            background: linear-gradient(135deg, #f44336, #d32f2f);
-            border-left: 4px solid #c62828;
-        }
-
-        @keyframes slideInRight {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-
-        /* Stack multiple toasts */
-        .toast:nth-child(n+2) {
-            top: calc(20px + (60px * var(--toast-index, 0)));
-        }
+        /* Toast notifications removed for minimal UI */
         
         /* Log Entry Styles */
         .log-entry {
@@ -763,18 +724,7 @@
             </div>
         </div>
 
-        <!-- Recent Trades Section -->
-        <div class="card">
-            <div class="card-header">
-                <i class="fas fa-history"></i>
-                <h3>Recent Trades</h3>
-            </div>
-            <div id="tradesContainer">
-                <div class="loading">
-                    <i class="fas fa-spinner fa-spin"></i> Loading trades...
-                </div>
-            </div>
-        </div>
+
 
         <!-- Live Logs Section -->
         <div class="logs-section">
@@ -845,6 +795,7 @@
         let forceRefreshTimer = null;
         let lastSuccessfulUpdate = Date.now();
         let connectionHealthCheck = null;
+        let sseConnected = false;
 
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', function() {
@@ -870,8 +821,7 @@
             refreshBtn.className = 'btn btn-refresh';
             refreshBtn.style.cssText = 'background: linear-gradient(45deg, #2196F3, #1976D2); color: white; margin-left: 10px;';
             refreshBtn.addEventListener('click', () => {
-                showSuccess('Refreshing dashboard...');
-                setTimeout(() => location.reload(), 500);
+                setTimeout(() => location.reload(), 100);
             });
             const controlButtons = document.querySelector('.control-buttons');
             if (controlButtons) {
@@ -888,9 +838,6 @@
             
             // Start connection health monitoring
             startConnectionHealthCheck();
-            
-            // Auto-refresh if no updates for too long
-            startForceRefreshTimer();
             
             isInitialized = true;
             console.log('✅ Dashboard initialized successfully');
@@ -921,8 +868,7 @@
                     logContainer.classList.remove('disconnected');
                 }
                 
-                // Show success toast
-                showToast('Live logs connected successfully!', 'success');
+                // Connection established silently
             } else {
                 // Update text status
                 statusTextEl.textContent = 'Disconnected';
@@ -941,22 +887,20 @@
         }
 
         function startDataUpdates() {
-            // Update status and metrics every 2 seconds
+            // Update status and metrics every 5 seconds
             updateInterval = setInterval(() => {
                 updateStatus();
-                updateTrades();
-            }, 2000);
+            }, 5000);
 
-            // Update logs every 1 second
+            // Update logs every 3 seconds when SSE is not connected
             logUpdateInterval = setInterval(() => {
                 if (!eventSource || eventSource.readyState !== EventSource.OPEN) {
                     updateLogs();
                 }
-            }, 1000);
+            }, 3000);
 
             // Initial updates
             updateStatus();
-            updateTrades();
             updateLogs();
         }
 
@@ -995,13 +939,11 @@
                     clearTimeout(connectionTimeout);
                     console.log('✅ SSE connection opened successfully');
                     updateConnectionStatus(true);
+                    sseConnected = true;
                     reconnectAttempts = 0;
                     reconnectDelay = 2000; // Reset delay
                     
-                    // Show success message only on first connection or after reconnection
-                    if (reconnectAttempts > 0 || !isConnected) {
-                        showSuccess('Live logs connected');
-                    }
+                    // Connection restored silently
                 };
 
                 eventSource.onmessage = function(event) {
@@ -1026,7 +968,6 @@
                         
                         if (logData.type === 'error') {
                             console.error('SSE stream error:', logData.message);
-                            showError('Log streaming error: ' + logData.message);
                             return;
                         }
                         
@@ -1054,6 +995,7 @@
         
         function handleSSEError(errorMessage) {
             updateConnectionStatus(false);
+            sseConnected = false;
             
             if (reconnectAttempts < maxReconnectAttempts) {
                 reconnectAttempts++;
@@ -1061,10 +1003,7 @@
                 
                 console.log(`SSE reconnection ${reconnectAttempts}/${maxReconnectAttempts} in ${delay/1000}s... (${errorMessage})`);
                 
-                // Only show error message for first few attempts
-                if (reconnectAttempts <= 3) {
-                    showError(`Connection lost. Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`);
-                }
+                // Reconnecting silently
                 
                 connectionRetryTimeout = setTimeout(() => {
                     if (!isConnected) {
@@ -1072,8 +1011,7 @@
                     }
                 }, delay);
             } else {
-                console.error('Max SSE reconnection attempts reached');
-                showError('Live logs connection failed. Using fallback polling.');
+                console.error('Max SSE reconnection attempts reached. Using fallback polling.');
                 
                 // Fall back to polling if SSE fails completely
                 startPollingFallback();
@@ -1081,15 +1019,13 @@
         }
         
         function startPollingFallback() {
-            console.log('Starting polling fallback for logs...');
-            
             // Clear any existing SSE
             if (eventSource) {
                 eventSource.close();
                 eventSource = null;
             }
             
-            // Use more frequent polling as fallback
+            // Use less frequent polling as fallback
             if (logUpdateInterval) {
                 clearInterval(logUpdateInterval);
             }
@@ -1098,12 +1034,11 @@
                 if (!logsUpdateInProgress) {
                     updateLogs();
                 }
-            }, 2000); // Poll every 2 seconds
+            }, 5000); // Poll every 5 seconds
         }
 
         async function updateStatus() {
             if (statusUpdateInProgress) {
-                console.log('Status update already in progress, skipping...');
                 return;
             }
             
@@ -1111,7 +1046,7 @@
             
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
                 
                 const response = await fetch('/api/status', {
                     signal: controller.signal,
@@ -1180,17 +1115,17 @@
                 updateButtonStates(data.status || 'unknown');
                 
             } catch (error) {
-                console.error('Error updating status:', error);
-                
-                // Only show error if it's been a while since last successful update
-                const timeSinceLastUpdate = Date.now() - lastSuccessfulUpdate;
-                if (timeSinceLastUpdate > 30000) { // 30 seconds
-                    showError(`Connection issue: ${error.message}`);
-                }
-                
-                // Update connection status but don't spam errors
-                if (timeSinceLastUpdate > 10000) { // 10 seconds
-                    updateConnectionStatus(false);
+                // Only log non-abort errors
+                if (error.name !== 'AbortError') {
+                    console.error('Error updating status:', error);
+                    
+                    // Log connection issues silently
+                    const timeSinceLastUpdate = Date.now() - lastSuccessfulUpdate;
+                    
+                    // Update connection status but don't spam errors
+                    if (timeSinceLastUpdate > 10000) { // 10 seconds
+                        updateConnectionStatus(false);
+                    }
                 }
             } finally {
                 statusUpdateInProgress = false;
@@ -1274,53 +1209,13 @@
                 restartBtn.classList.remove('btn-disabled');
             }
             
-            console.log(`Button states updated for bot status: ${status}`);
+            // Button states updated silently
         }
 
-        async function updateTrades() {
-            try {
-                const response = await fetch('/api/trades');
-                if (!response.ok) throw new Error('Failed to fetch trades');
-                
-                const data = await response.json();
-                const trades = data.trades || [];
-                
-                const container = document.getElementById('tradesContainer');
-                if (trades.length === 0) {
-                    container.innerHTML = '<div class="loading">No trades yet</div>';
-                    return;
-                }
-                
-                let html = '<table class="trades-table">';
-                html += '<thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Amount</th><th>Price</th><th>P&L</th></tr></thead><tbody>';
-                
-                trades.forEach(trade => {
-                    const time = new Date(trade.timestamp).toLocaleTimeString();
-                    const sideClass = trade.side === 'BUY' ? 'trade-buy' : 'trade-sell';
-                    const pnlClass = trade.profit >= 0 ? 'positive' : 'negative';
-                    
-                    html += `<tr>
-                        <td>${time}</td>
-                        <td>${trade.symbol}</td>
-                        <td class="${sideClass}">${trade.side}</td>
-                        <td>${trade.amount}</td>
-                        <td>$${trade.price.toFixed(2)}</td>
-                        <td class="${pnlClass}">$${trade.profit.toFixed(2)}</td>
-                    </tr>`;
-                });
-                
-                html += '</tbody></table>';
-                container.innerHTML = html;
-                
-            } catch (error) {
-                console.error('Error updating trades:', error);
-                document.getElementById('tradesContainer').innerHTML = '<div class="error-message">Error loading trades</div>';
-            }
-        }
+
 
         async function updateLogs() {
             if (logsUpdateInProgress) {
-                console.log('Logs update already in progress, skipping...');
                 return;
             }
             
@@ -1347,7 +1242,7 @@
                 }
                 
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+                const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout
                 
                 const response = await fetch(`/api/logs/stream?${params}`, {
                     signal: controller.signal,
@@ -1385,13 +1280,16 @@
                 updateLogStats(data);
                 
             } catch (error) {
-                console.error('Error updating logs:', error);
-                
-                // Only show error if SSE is not connected and it's been a while
-                if (!sseConnected && Date.now() - lastSuccessfulUpdate > 15000) {
-                    const container = document.getElementById('logsContainer');
-                    if (container && container.children.length <= 1) {
-                        container.innerHTML = `<div class="error-message">Connection issue: ${error.message}</div>`;
+                // Only log non-abort errors
+                if (error.name !== 'AbortError') {
+                    console.error('Error updating logs:', error);
+                    
+                    // Only show error if SSE is not connected and it's been a while
+                    if (!sseConnected && Date.now() - lastSuccessfulUpdate > 15000) {
+                        const container = document.getElementById('logsContainer');
+                        if (container && container.children.length <= 1) {
+                            container.innerHTML = `<div class="error-message">Connection issue: ${error.message}</div>`;
+                        }
                     }
                 }
             } finally {
@@ -1564,14 +1462,11 @@
         async function controlBot(action) {
             // Prevent multiple simultaneous requests
             if (botControlInProgress) {
-                console.log('Bot control already in progress, ignoring action:', action);
-                showError(`Please wait, another bot operation is in progress`);
                 return;
             }
             
             // Prevent rapid clicking
             if (buttonCooldown) {
-                console.log('Button on cooldown, ignoring action:', action);
                 return;
             }
             
@@ -1599,7 +1494,7 @@
                 actionBtn.classList.add('btn-processing');
             }
             
-            console.log(`Sending ${action} request to bot...`);
+            // Sending bot control request
             
             try {
                 const response = await fetch(`/api/control/${action}`, {
@@ -1615,7 +1510,7 @@
                 }
                 
                 const data = await response.json();
-                console.log('Bot control response:', data);
+                // Bot control response received
                 
                 // Reset button text
                 if (actionBtn) {
@@ -1625,7 +1520,7 @@
                 
                 // Handle response
                 if (data.success) {
-                    showSuccess(data.message || `Bot ${action} successful`);
+                    // Bot action completed successfully
                     
                     // Update status immediately
                     setTimeout(updateStatus, 500);
@@ -1647,7 +1542,7 @@
                         }, 10000);
                     }
                 } else {
-                    showError(data.message || `Failed to ${action} bot`);
+                    console.error(data.message || `Failed to ${action} bot`);
                 }
                 
                 // Re-enable buttons after a short delay
@@ -1658,7 +1553,6 @@
                 
             } catch (error) {
                 console.error(`Error ${action}ing bot:`, error);
-                showError(`Error ${action}ing bot: ${error.message || 'Connection failed'}`);
                 
                 // Reset button text
                 if (actionBtn) {
@@ -1696,59 +1590,18 @@
             }
         }
 
-        function showError(message) {
-            const toast = document.createElement('div');
-            toast.className = 'toast toast-error';
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            
-            // Auto remove after 5 seconds
-            setTimeout(() => {
-                if (toast.parentNode) {
-                    toast.parentNode.removeChild(toast);
-                }
-            }, 5000);
-        }
-
-        function showSuccess(message) {
-            const toast = document.createElement('div');
-            toast.className = 'toast toast-success';
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            
-            // Auto remove after 3 seconds
-            setTimeout(() => {
-                if (toast.parentNode) {
-                    toast.parentNode.removeChild(toast);
-                }
-            }, 3000);
-        }
-
-        function showToast(message, type = 'info') {
-            const toast = document.createElement('div');
-            toast.className = `toast toast-${type}`;
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            
-            // Auto remove after 4 seconds
-            setTimeout(() => {
-                if (toast.parentNode) {
-                    toast.parentNode.removeChild(toast);
-                }
-            }, 4000);
-        }
+        // Toast notification functions removed for minimal UI
 
         function startConnectionHealthCheck() {
-            // Check connection health every 30 seconds
+            // Check connection health every 60 seconds
             setInterval(() => {
                 if (!isConnected) {
-                    console.warn('⚠️ Connection lost, attempting to reconnect...');
-                    // Try to reinitialize SSE connection
+                    // Try to reinitialize SSE connection silently
                     if (eventSource && eventSource.readyState !== EventSource.OPEN) {
                         initializeSSE();
                     }
                 }
-            }, 30000);
+            }, 60000);
         }
 
         // Cleanup on page unload
